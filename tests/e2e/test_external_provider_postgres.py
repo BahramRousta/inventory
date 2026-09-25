@@ -463,3 +463,159 @@ async def test_external_payment_success_uses_hold_as_final_allocation_and_snapsh
     assert provider_state.status_code == 200
     assert provider_state.json()["status"] == "HELD"
     assert provider_state.json()["hold_ref"] == original_ref
+
+
+async def test_pending_external_create_replay_stays_202_and_does_not_duplicate_work(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-PENDING-REPLAY",
+    )
+    registry = _registry(source.provider_id, fake_provider_url)
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        first = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="ext-pending-replay"),
+            json=create_body(source),
+        )
+        second = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="ext-pending-replay"),
+            json=create_body(source),
+        )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.headers["retry-after"] == "1"
+    assert second.headers["retry-after"] == "1"
+    assert first.json()["reservation_id"] == second.json()["reservation_id"]
+
+    reservation_id = UUID(first.json()["reservation_id"])
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        lines = (
+            await session.scalars(
+                select(ReservationLineModel).where(
+                    ReservationLineModel.reservation_id == reservation_id
+                )
+            )
+        ).all()
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RESERVING
+    assert len(lines) == 1
+    assert lines[0].status == ReservationLineStatus.HOLD_PENDING
+
+
+async def test_payment_failure_before_external_hold_claim_finishes_cancelled_without_remote_hold(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-PAY-FAIL-PENDING",
+    )
+    registry = _registry(source.provider_id, fake_provider_url)
+    event_id = uuid4()
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="ext-pay-fail-pending"),
+            json=create_body(source),
+        )
+        reservation_id = UUID(created.json()["reservation_id"])
+        failed = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(event_id), "outcome": "FAILURE"},
+        )
+
+    assert created.status_code == 202
+    assert failed.status_code == 202
+    assert failed.json()["status"] == "RELEASING"
+
+    processed = await ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute(reservation_id)
+    assert processed is True
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CANCELLED
+    assert reservation.release_reason == "PAYMENT_FAILED"
+    assert line is not None
+    assert line.status == ReservationLineStatus.FAILED
+    assert line.external_hold_ref is None
+    assert order_count == 0
+
+    hold_key = f"{reservation_id}:{source.source_id}:HOLD"
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
+    assert provider_state.status_code == 404
+
+
+async def test_cancel_before_external_hold_claim_finishes_cancelled_without_provider_call(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-CANCEL-PENDING",
+    )
+    registry = _registry(source.provider_id, fake_provider_url)
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="ext-cancel-pending"),
+            json=create_body(source),
+        )
+        reservation_id = UUID(created.json()["reservation_id"])
+        cancelled = await client.post(
+            f"/reservations/{reservation_id}/cancel",
+            headers=create_headers(user_id="user-1"),
+        )
+
+    assert created.status_code == 202
+    assert cancelled.status_code == 202
+    assert cancelled.json()["status"] == "RELEASING"
+
+    await ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute(reservation_id)
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CANCELLED
+    assert reservation.release_reason == "USER_CANCELLED"
+    assert line is not None
+    assert line.status == ReservationLineStatus.FAILED
+
+    hold_key = f"{reservation_id}:{source.source_id}:HOLD"
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
+    assert provider_state.status_code == 404
