@@ -8,6 +8,9 @@ from app.application.ports.provider_gateway import InMemoryProviderGatewayRegist
 from app.application.services.claim_pending_provider_holds import (
     ClaimPendingProviderHoldsService,
 )
+from app.application.services.expire_reserving_reservation import (
+    ExpireReservingReservationService,
+)
 from app.application.services.process_claimed_provider_release import (
     ProcessClaimedProviderReleaseService,
 )
@@ -612,6 +615,67 @@ async def test_cancel_before_external_hold_claim_finishes_cancelled_without_prov
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert reservation.release_reason == "USER_CANCELLED"
+    assert line is not None
+    assert line.status == ReservationLineStatus.FAILED
+
+    hold_key = f"{reservation_id}:{source.source_id}:HOLD"
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
+    assert provider_state.status_code == 404
+
+
+async def test_expiry_before_external_hold_claim_finishes_expired_without_provider_call(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-EXPIRE-PENDING",
+    )
+    registry = _registry(source.provider_id, fake_provider_url)
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="ext-expire-pending"),
+            json=create_body(source),
+        )
+    assert created.status_code == 202
+    reservation_id = UUID(created.json()["reservation_id"])
+
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import update
+
+    async with postgres_session_factory.begin() as session:
+        await session.execute(
+            update(ReservationModel)
+            .where(ReservationModel.id == reservation_id)
+            .values(
+                expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
+            )
+        )
+
+    claimed = await ExpireReservingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute_batch(limit=10)
+    assert reservation_id in claimed
+
+    await ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute(reservation_id)
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.EXPIRED
+    assert reservation.release_reason == "EXPIRED"
     assert line is not None
     assert line.status == ReservationLineStatus.FAILED
 
