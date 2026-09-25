@@ -44,18 +44,22 @@ The assignment demo chooses this explicit provider contract:
 
 **A successful HOLD is the final external allocation.**
 
-There is no remote CONFIRM operation. This is persisted as provider capability
-metadata (`hold_is_final_allocation=true`) and is checked before an external
-source can participate in a guaranteed reservation or be finalized after
-payment.
+There is no remote CONFIRM operation. The HTTP provider adapter declares this
+contract through `ProviderCapabilities.hold_is_final_allocation`, and the
+application checks the configured adapter before an external source can
+participate in a guaranteed reservation or be finalized after payment.
 
-External providers also declare support for HOLD, RELEASE and GET_HOLD. A
-query-only or otherwise insufficient external provider is rejected before a
-reservation is created.
+Provider operation capabilities belong to adapter code rather than provider
+rows in PostgreSQL. The configured gateway declares support for HOLD, RELEASE,
+GET_HOLD, and final-allocation semantics. A query-only or otherwise
+insufficient adapter is rejected before a reservation is created.
 
-Provider-specific authentication and payload details stay in infrastructure
-adapters. The database stores only a non-secret `config_key` and optional
-`credential_ref`; raw credentials are not modeled here.
+Provider runtime configuration is environment-backed and assembled by
+`ProviderGatewayFactory`. Provider ID, base URL, timeout, and optional API key
+come from deployment settings/CI secret injection. Provider-specific
+authentication, request shapes, capabilities, and errors stay in
+infrastructure adapters; raw credentials are not persisted in this service's
+database.
 
 ## Payment and confirmation
 
