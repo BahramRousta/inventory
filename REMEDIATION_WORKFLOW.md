@@ -10,14 +10,15 @@ This branch implements Steps 1–8 and Step 10.
   canonical request fingerprints, snapshot metadata, Location and retry hints.
 - Step 4: complete — trusted, idempotent payment outcomes orchestrate success
   and failure transitions.
-- Step 5: complete — the configured provider contract is explicitly
-  **HOLD is final allocation** and is persisted as capability metadata.
+- Step 5: complete — reservation-capable providers explicitly expose
+  **HOLD is final allocation** through the reservation provider interface.
 - Step 6: complete — orders persist immutable reservation lines.
-- Step 7: complete — provider capabilities are declared by adapter
-  configuration/factory code, while endpoints and credentials are injected from
-  environment-backed settings and checked for reservation eligibility.
-- Step 8: complete — Compose runs a standalone fake HTTP provider and separate
-  hold/release/reconciliation/expiry workers.
+- Step 7: complete — provider operations are represented by separate
+  capability-specific ports. Query-only providers cannot be selected for
+  reservation work.
+- Step 8: simplified for interview scope — Compose runs separate workers while
+  provider behavior is represented by deterministic mock gateways rather than a
+  production-style HTTP provider implementation.
 - Step 9: test suite added — PostgreSQL-backed API/database, provider,
   concurrency, claim/lease, reconciliation, and payment-race scenarios are
   implemented. Execution still requires a disposable `TEST_DATABASE_URL`.
@@ -208,11 +209,10 @@ remain the item/source detail for the assignment.
    adapter.
 2. Reject query-only and otherwise insufficient providers before creating a
    guaranteed checkout reservation.
-3. Inject provider endpoints, credentials, and runtime settings through
-   environment-backed deployment configuration; do not persist raw credentials
-   or provider payloads.
-4. Keep provider-specific authentication, request shapes, capabilities, and
-   errors in infrastructure adapters/factories.
+3. Keep provider selection/configuration in the factory; do not persist
+   provider behavior flags in PostgreSQL.
+4. A production HTTP/authentication adapter is intentionally outside this
+   interview implementation.
 
 **Assumption:** provider onboarding UI is out of scope; configuration may be
 seeded or environment-backed for the assignment demo.
@@ -227,20 +227,18 @@ capabilities satisfy the workflow.
 
 **Implementation:**
 
-1. Run a standalone fake HTTP provider for the assignment demo instead of
-   process-local in-memory hold state.
-2. Support at least a success scenario and a non-happy scenario such as
-   timeout after the fake provider has accepted a hold.
+1. Use a simple configurable provider mock at the provider port boundary.
+2. Support success, definitive decline, and ambiguous/unknown outcomes.
 3. Configure separate HOLD, RELEASE, reconciliation, and expiry worker
    services in Compose or documented process commands.
 4. Keep batch claim size configurable (default 500), worker concurrency
-   configurable (default 5), and all provider HTTP outside a DB transaction.
+   configurable (default 5), and provider work outside DB transactions.
 
 **Assumption:** PostgreSQL remains the sole shared authority for local state;
 no distributed lock or message broker is introduced.
 
-**Done when:** API, each worker, and the fake provider can run in separate
-processes while reconciliation still observes the same provider state.
+**Done when:** API/workers exercise the complete reservation state machine and
+tests can deterministically drive success, decline, and reconciliation paths.
 
 ## Step 9 — Add authorized end-to-end verification
 
@@ -251,8 +249,8 @@ processes while reconciliation still observes the same provider state.
 1. PostgreSQL-backed API-to-database tests for internal hold, confirm, cancel,
    expiry, idempotency, duplicate lines, and final reservation lines.
 2. Concurrent final-unit test against PostgreSQL.
-3. Actual fake-HTTP-provider tests for hold success, definitive decline,
-   timeout-after-side-effect, release, and reconciliation.
+3. Provider-boundary tests for hold success, definitive decline, unknown
+   outcome, release, and reconciliation using configurable mocks.
 4. Worker claim/lease tests proving `FOR UPDATE SKIP LOCKED`, stale-lease
    recovery, and no duplicate local state transition.
 5. Payment-vs-expiry and duplicate/contradictory payment-outcome tests.
