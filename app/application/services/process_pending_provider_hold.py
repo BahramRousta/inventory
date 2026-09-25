@@ -30,7 +30,7 @@ class ProcessPendingProviderHoldService:
             ):
                 return False
 
-        gateway = self._provider_gateways.get(work.provider_id)
+        gateway = self._provider_gateways.get_reservation_provider(work.provider_id)
         result = await self._attempt_hold(
             gateway=gateway,
             work=work,
