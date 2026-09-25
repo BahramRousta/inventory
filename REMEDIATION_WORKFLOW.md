@@ -13,9 +13,10 @@ This branch implements Steps 1–8 and Step 10.
 - Step 5: complete — reservation-capable providers explicitly expose
   **HOLD is final allocation** through the reservation provider interface.
 - Step 6: complete — orders persist immutable reservation lines.
-- Step 7: complete — provider operations are represented by separate
-  capability-specific ports. Query-only providers cannot be selected for
-  reservation work.
+- Step 7: complete — provider-specific mechanics are hidden behind one
+  `InventoryProvider.reserve(...)` contract; query-style and hold-style
+  providers are selected by the factory but processed identically by the
+  application worker.
 - Step 8: simplified for interview scope — Compose runs separate workers while
   provider behavior is represented by deterministic mock gateways rather than a
   production-style HTTP provider implementation.
@@ -204,11 +205,9 @@ remain the item/source detail for the assignment.
 
 **Implementation:**
 
-1. Resolve whether a provider supports query, hold, release, status lookup,
-   and either commit or final-allocation hold semantics from its configured
-   adapter.
-2. Reject query-only and otherwise insufficient providers before creating a
-   guaranteed checkout reservation.
+1. Keep provider-specific query/HOLD behavior behind the provider adapter.
+2. Create flow validates enabled provider/source state only; provider execution
+   later calls the common `reserve(...)` operation.
 3. Keep provider selection/configuration in the factory; do not persist
    provider behavior flags in PostgreSQL.
 4. A production HTTP/authentication adapter is intentionally outside this
