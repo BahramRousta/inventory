@@ -661,7 +661,9 @@ class SqlAlchemyReservationRepository:
             update(ReservationModel)
             .where(
                 ReservationModel.id.in_(reservation_ids),
-                ReservationModel.status == ReservationStatus.RESERVING,
+                ReservationModel.status.in_(
+                    (ReservationStatus.RESERVING, ReservationStatus.ACTIVE)
+                ),
                 ReservationModel.expires_at <= func.now(),
             )
             .values(status=ReservationStatus.RELEASING, release_reason="EXPIRED")
