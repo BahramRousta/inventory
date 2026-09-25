@@ -22,6 +22,11 @@ class ProcessReleasingReservationService:
                 tuple(line.stock_source_id for line in lines)
             )
             for line in lines:
+                if line.status == ReservationLineStatus.HOLD_PENDING:
+                    await uow.reservations.fail_pending_hold_for_release(
+                        reservation_id, line.stock_source_id
+                    )
+                    continue
                 if line.status != ReservationLineStatus.HELD:
                     continue
                 if not await uow.reservations.claim_line_for_release(
