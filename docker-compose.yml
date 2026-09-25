@@ -26,25 +26,13 @@ services:
       db:
         condition: service_healthy
 
-  fake-provider:
-    build: .
-    environment:
-      FAKE_PROVIDER_MODE: success
-      FAKE_PROVIDER_TIMEOUT_SECONDS: 5
-    command: uvicorn app.fake_provider:app --host 0.0.0.0 --port 9000
-    volumes:
-      - .:/app
-    ports:
-      - "9000:9000"
-
   api:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
       RESERVATION_TTL_SECONDS: 900
       EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
-      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
-      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      MOCK_PROVIDER_MODE: success
       PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
       PROVIDER_WORKER_BATCH_SIZE: 500
       PROVIDER_WORKER_LEASE_SECONDS: 60
@@ -57,16 +45,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      fake-provider:
-        condition: service_started
 
   hold-worker:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
       EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
-      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
-      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      MOCK_PROVIDER_MODE: success
       PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
       PROVIDER_WORKER_BATCH_SIZE: 500
       PROVIDER_WORKER_LEASE_SECONDS: 60
@@ -77,16 +62,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      fake-provider:
-        condition: service_started
 
   release-worker:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
       EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
-      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
-      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      MOCK_PROVIDER_MODE: success
       PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
       PROVIDER_WORKER_BATCH_SIZE: 500
       PROVIDER_WORKER_LEASE_SECONDS: 60
@@ -97,16 +79,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      fake-provider:
-        condition: service_started
 
   reconciliation-worker:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
       EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
-      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
-      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      MOCK_PROVIDER_MODE: success
       PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
       PROVIDER_WORKER_BATCH_SIZE: 500
       PROVIDER_WORKER_LEASE_SECONDS: 60
@@ -117,8 +96,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      fake-provider:
-        condition: service_started
 
   expiry-worker:
     build: .
