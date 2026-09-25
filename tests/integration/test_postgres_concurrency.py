@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select
 
-from app.application.services.expire_reserving_reservation import (
+from app.application.services.expiry.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
 from app.application.errors import ReservationStateConflict
