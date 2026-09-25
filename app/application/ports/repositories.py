@@ -35,7 +35,6 @@ class ReservationRepository(Protocol):
         reservation_id: UUID,
         user_id: str,
         idempotency_key: str,
-        request_fingerprint: str,
         expires_at: datetime,
         status: ReservationStatus,
     ) -> None: ...
