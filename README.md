@@ -13,13 +13,14 @@ during checkout.
 - required `Idempotency-Key` request header with body fingerprint checking;
 - trusted payment-outcome orchestration;
 - final order creation linked to the reservation;
-- capability-specific provider ports: query-only providers are distinct from
-  reservation-capable providers;
+- one provider port with a single `reserve(...)` operation; each provider
+  hides whether it uses an availability query or a real reservation/HOLD API;
 - simple configurable mock provider outcomes for interview/demo scenarios;
 - independent hold, release, reconciliation and expiry worker processes.
 
-The configured demo provider uses **HOLD is final allocation** semantics. There
-is no remote provider-confirm call.
+Provider-specific mechanics are hidden behind `InventoryProvider.reserve()`.
+A query-style provider can implement it with an availability check, while a
+reservation-style provider can implement it with HOLD semantics.
 
 ## Run
 
@@ -41,10 +42,9 @@ The seeded external provider ID is:
 11111111-1111-1111-1111-111111111111
 ```
 
-Compose configures every provider worker with that same provider ID. The
-factory selects a reservation-capable mock gateway for that ID. Query-only
-providers use a separate availability interface and cannot enter the
-reservation workflow.
+Compose configures every provider worker with that same provider ID. The factory selects the configured provider implementation for that ID.
+Create flow only validates that the provider/source are enabled; the worker
+loads the provider later and calls the same `reserve()` contract.
 
 ## Create a reservation
 
