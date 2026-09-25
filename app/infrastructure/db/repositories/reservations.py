@@ -44,7 +44,9 @@ class SqlAlchemyReservationRepository:
             reservation_id=row.id,
             user_id=row.user_id,
             idempotency_key=row.idempotency_key,
+            request_fingerprint=row.request_fingerprint,
             status=row.status,
+            created_at=_as_utc(row.created_at),
             expires_at=_as_utc(row.expires_at),
         )
 
@@ -54,6 +56,7 @@ class SqlAlchemyReservationRepository:
         reservation_id: UUID,
         user_id: str,
         idempotency_key: str,
+        request_fingerprint: str,
         expires_at: datetime,
         status: ReservationStatus,
     ) -> None:
@@ -62,6 +65,7 @@ class SqlAlchemyReservationRepository:
                 id=reservation_id,
                 user_id=user_id,
                 idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
                 expires_at=expires_at,
                 status=status,
             )
