@@ -6,24 +6,6 @@ from typing import Protocol
 from uuid import UUID
 
 
-@dataclass(frozen=True)
-class ProviderCapabilities:
-    supports_check: bool = False
-    supports_hold: bool = False
-    supports_release: bool = False
-    supports_get_hold: bool = False
-    hold_is_final_allocation: bool = False
-
-    @property
-    def supports_reservation_workflow(self) -> bool:
-        return (
-            self.supports_hold
-            and self.supports_release
-            and self.supports_get_hold
-            and self.hold_is_final_allocation
-        )
-
-
 class ProviderHoldOutcome(StrEnum):
     HELD = "HELD"
     DECLINED = "DECLINED"
@@ -42,9 +24,12 @@ class ProviderHoldLookupOutcome(StrEnum):
 
 
 @dataclass(frozen=True)
-class ProviderHoldResult:
-    """Provider-neutral outcome for one external inventory HOLD attempt."""
+class ProviderAvailabilityResult:
+    available_quantity: int
 
+
+@dataclass(frozen=True)
+class ProviderHoldResult:
     outcome: ProviderHoldOutcome
     external_hold_ref: str | None = None
     external_expires_at: datetime | None = None
@@ -64,11 +49,17 @@ class ProviderHoldLookupResult:
     error_code: str | None = None
 
 
-class ProviderGateway(Protocol):
-    """Application-owned boundary for one provider adapter."""
+class AvailabilityProviderGateway(Protocol):
+    """Provider that can only answer availability queries."""
 
-    capabilities: ProviderCapabilities
+    async def check_availability(
+        self,
+        *,
+        stock_source_id: UUID,
+    ) -> ProviderAvailabilityResult: ...
 
+
+class HoldProviderGateway(Protocol):
     async def hold(
         self,
         *,
@@ -78,6 +69,8 @@ class ProviderGateway(Protocol):
         expires_at: datetime,
     ) -> ProviderHoldResult: ...
 
+
+class ReleaseProviderGateway(Protocol):
     async def release(
         self,
         *,
@@ -86,18 +79,50 @@ class ProviderGateway(Protocol):
         release_key: str,
     ) -> ProviderReleaseResult: ...
 
+
+class HoldStatusProviderGateway(Protocol):
     async def get_hold(self, *, hold_key: str) -> ProviderHoldLookupResult: ...
 
 
+class ReservationProviderGateway(
+    HoldProviderGateway,
+    ReleaseProviderGateway,
+    HoldStatusProviderGateway,
+    Protocol,
+):
+    """Provider contract required by the checkout reservation workflow."""
+
+    hold_is_final_allocation: bool
+
+
 class ProviderGatewayRegistry(Protocol):
-    def get(self, provider_id: UUID) -> ProviderGateway | None: ...
+    def get_reservation_provider(
+        self, provider_id: UUID
+    ) -> ReservationProviderGateway | None: ...
+
+    def get_availability_provider(
+        self, provider_id: UUID
+    ) -> AvailabilityProviderGateway | None: ...
 
 
-class InMemoryProviderGatewayRegistry:
-    """Runtime registry populated by the infrastructure provider factory."""
+class ProviderRegistry:
+    """Small runtime registry populated by the provider factory."""
 
-    def __init__(self, gateways: Mapping[UUID, ProviderGateway] | None = None) -> None:
-        self._gateways = dict(gateways or {})
+    def __init__(
+        self,
+        *,
+        reservation_providers: Mapping[UUID, ReservationProviderGateway] | None = None,
+        availability_providers: Mapping[UUID, AvailabilityProviderGateway] | None = None,
+    ) -> None:
+        self._reservation_providers = dict(reservation_providers or {})
+        self._availability_providers = dict(availability_providers or {})
 
-    def get(self, provider_id: UUID) -> ProviderGateway | None:
-        return self._gateways.get(provider_id)
+    def get_reservation_provider(
+        self, provider_id: UUID
+    ) -> ReservationProviderGateway | None:
+        return self._reservation_providers.get(provider_id)
+
+    def get_availability_provider(
+        self, provider_id: UUID
+    ) -> AvailabilityProviderGateway | None:
+        return self._availability_providers.get(provider_id)
