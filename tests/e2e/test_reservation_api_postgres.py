@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from app.application.ports.provider_gateway import ProviderCapabilities
+from app.infrastructure.providers.mock import MockAvailabilityProviderGateway
 from app.application.services.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
@@ -28,7 +28,7 @@ from tests.e2e.support import (
     create_headers,
     reservation_count,
     reservation_line_count,
-    registry_with_capabilities,
+    availability_only_registry,
     seed_external_source,
     seed_internal_source,
     uow_factory,
@@ -310,22 +310,16 @@ async def test_create_requires_verified_user_and_idempotency_headers(
     assert stock.held == 0
 
 
-async def test_external_provider_without_required_capabilities_is_rejected(
+async def test_query_only_provider_is_rejected_for_reservation_workflow(
     postgres_session_factory,
 ):
     source = await seed_external_source(
         postgres_session_factory,
         sku="QUERY-ONLY",
     )
-    registry = registry_with_capabilities(
+    registry = availability_only_registry(
         source.provider_id,
-        ProviderCapabilities(
-            supports_check=True,
-            supports_hold=False,
-            supports_release=False,
-            supports_get_hold=False,
-            hold_is_final_allocation=False,
-        ),
+        MockAvailabilityProviderGateway(),
     )
 
     async with api_client(
