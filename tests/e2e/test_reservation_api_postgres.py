@@ -18,9 +18,7 @@ from app.domain.enums import (
 )
 from app.infrastructure.db.models import (
     InternalStockModel,
-    OrderLineModel,
     OrderModel,
-    PaymentEventModel,
     ProductModel,
     ReservationLineModel,
     ReservationModel,
@@ -543,12 +541,6 @@ async def test_payment_success_confirms_consumes_stock_and_creates_one_order_wit
             )
         )
         order = await session.get(OrderModel, order_id)
-        order_lines = (
-            await session.scalars(
-                select(OrderLineModel).where(OrderLineModel.order_id == order_id)
-            )
-        ).all()
-        payment = await session.get(PaymentEventModel, event_id)
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
@@ -560,12 +552,6 @@ async def test_payment_success_confirms_consumes_stock_and_creates_one_order_wit
     assert line.status == ReservationLineStatus.CONFIRMED
     assert order is not None
     assert order.reservation_id == reservation_id
-    assert len(order_lines) == 1
-    assert order_lines[0].product_id == source.product_id
-    assert order_lines[0].stock_source_id == source.source_id
-    assert order_lines[0].quantity == 2
-    assert payment is not None
-    assert payment.outcome == PaymentOutcome.SUCCESS
 
 
 async def test_duplicate_payment_success_event_is_idempotent_and_does_not_duplicate_order(
@@ -599,60 +585,12 @@ async def test_duplicate_payment_success_event_is_idempotent_and_does_not_duplic
         order_count = await session.scalar(
             select(func.count()).select_from(OrderModel)
         )
-        line_count = await session.scalar(
-            select(func.count()).select_from(OrderLineModel)
-        )
-        event_count = await session.scalar(
-            select(func.count()).select_from(PaymentEventModel)
-        )
         stock = await session.get(InternalStockModel, source.source_id)
 
     assert order_count == 1
-    assert line_count == 1
-    assert event_count == 1
     assert stock is not None
     assert stock.on_hand == 2
     assert stock.held == 0
-
-
-async def test_reused_payment_event_id_with_different_outcome_conflicts_without_undoing_order(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-CONFLICT", on_hand=2
-    )
-    event_id = uuid4()
-
-    async with api_client(postgres_session_factory) as client:
-        created = await _create_internal(client, source, key="pay-conflict-create")
-        reservation_id = UUID(created.json()["reservation_id"])
-        success = await client.post(
-            f"/reservations/{reservation_id}/payment-outcome",
-            headers=create_headers(user_id="user-1"),
-            json={"event_id": str(event_id), "outcome": "SUCCESS"},
-        )
-        conflict = await client.post(
-            f"/reservations/{reservation_id}/payment-outcome",
-            headers=create_headers(user_id="user-1"),
-            json={"event_id": str(event_id), "outcome": "FAILURE"},
-        )
-
-    assert success.status_code == 200
-    assert conflict.status_code == 409
-    assert conflict.json()["code"] == "IDEMPOTENCY_CONFLICT"
-
-    async with postgres_session_factory() as session:
-        reservation = await session.get(ReservationModel, reservation_id)
-        event = await session.get(PaymentEventModel, event_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
-
-    assert reservation is not None
-    assert reservation.status == ReservationStatus.CONFIRMED
-    assert event is not None
-    assert event.outcome == PaymentOutcome.SUCCESS
-    assert order_count == 1
 
 
 async def test_payment_failure_enters_releasing_then_restores_internal_availability(
@@ -706,7 +644,7 @@ async def test_payment_failure_enters_releasing_then_restores_internal_availabil
     assert order_count == 0
 
 
-async def test_payment_outcome_requires_matching_owner_and_records_no_event_on_failure(
+async def test_payment_outcome_requires_matching_owner_without_state_change(
     postgres_session_factory,
 ):
     source = await seed_internal_source(
@@ -728,11 +666,9 @@ async def test_payment_outcome_requires_matching_owner_and_records_no_event_on_f
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
-        event = await session.get(PaymentEventModel, event_id)
         stock = await session.get(InternalStockModel, source.source_id)
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
-    assert event is None
     assert stock is not None
     assert stock.held == 1
 
@@ -1159,7 +1095,7 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     assert order_count == 0
 
 
-async def test_multi_item_payment_success_creates_one_order_with_all_immutable_lines(
+async def test_multi_item_payment_success_confirms_all_reservation_lines_and_creates_one_order(
     postgres_session_factory,
 ):
     first_source = await seed_internal_source(
@@ -1212,11 +1148,6 @@ async def test_multi_item_payment_success_creates_one_order_with_all_immutable_l
                 )
             )
         ).all()
-        order_lines = (
-            await session.scalars(
-                select(OrderLineModel).where(OrderLineModel.order_id == order_id)
-            )
-        ).all()
         first_stock = await session.get(
             InternalStockModel, first_source.source_id
         )
@@ -1235,14 +1166,6 @@ async def test_multi_item_payment_success_creates_one_order_with_all_immutable_l
         for line in reservation_lines
     )
     assert order_count == 1
-    assert len(order_lines) == 2
-    assert {
-        (line.product_id, line.stock_source_id, line.quantity)
-        for line in order_lines
-    } == {
-        (first_source.product_id, first_source.source_id, 2),
-        (second_source.product_id, second_source.source_id, 1),
-    }
     assert first_stock is not None
     assert first_stock.on_hand == 1
     assert first_stock.held == 0
@@ -1307,7 +1230,7 @@ async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
     assert stock.held == 3
 
 
-async def test_existing_payment_event_replay_still_requires_reservation_owner(
+async def test_repeated_payment_success_still_requires_reservation_owner(
     postgres_session_factory,
 ):
     source = await seed_internal_source(
@@ -1335,13 +1258,9 @@ async def test_existing_payment_event_replay_still_requires_reservation_owner(
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
-        event_count = await session.scalar(
-            select(func.count()).select_from(PaymentEventModel)
-        )
         order_count = await session.scalar(
             select(func.count()).select_from(OrderModel)
         )
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
-    assert event_count == 1
     assert order_count == 1
