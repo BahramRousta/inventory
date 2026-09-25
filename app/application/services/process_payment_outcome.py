@@ -45,17 +45,17 @@ class ProcessPaymentOutcomeService:
         self, command: PaymentOutcomeCommand, payload_hash: str
     ) -> PaymentOutcomeResult:
         async with self._uow_factory() as uow:
+            reservation = await uow.reservations.get_by_id(command.reservation_id)
+            if reservation is None or reservation.user_id != command.user_id:
+                raise ReservationNotFound(
+                    f"Reservation {command.reservation_id} was not found."
+                )
+
             existing = await uow.payment_events.get(command.event_id)
             if existing is not None:
                 _assert_same_event(existing, payload_hash)
                 return await _snapshot_from_uow(
                     uow, command.reservation_id, command.user_id
-                )
-
-            reservation = await uow.reservations.get_by_id(command.reservation_id)
-            if reservation is None or reservation.user_id != command.user_id:
-                raise ReservationNotFound(
-                    f"Reservation {command.reservation_id} was not found."
                 )
 
             order_id: UUID | None = None
