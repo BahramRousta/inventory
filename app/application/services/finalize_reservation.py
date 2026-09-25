@@ -2,6 +2,7 @@ from uuid import UUID
 
 from app.application.dto.reservations import OrderLineRecord
 from app.application.errors import ReservationStateConflict
+from app.application.ports.provider_gateway import ProviderGatewayRegistry
 from app.application.ports.repositories import UnitOfWork
 from app.domain.enums import ProviderKind, ReservationLineStatus
 
@@ -11,6 +12,7 @@ async def finalize_confirming_reservation(
     *,
     reservation_id: UUID,
     user_id: str,
+    provider_gateways: ProviderGatewayRegistry,
 ) -> UUID:
     lines = await uow.reservations.get_lines(reservation_id)
     if not lines:
@@ -42,7 +44,12 @@ async def finalize_confirming_reservation(
                 )
             provider_ref = None
         else:
-            if not source.hold_is_final_allocation:
+            gateway = provider_gateways.get(source.provider_id)
+            if gateway is None:
+                raise ReservationStateConflict(
+                    f"Provider {source.provider_id} has no configured gateway."
+                )
+            if not gateway.capabilities.hold_is_final_allocation:
                 raise ReservationStateConflict(
                     f"Provider {source.provider_id} does not declare HOLD as final allocation."
                 )
