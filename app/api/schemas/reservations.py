@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from uuid import UUID
 
@@ -16,7 +15,8 @@ class ReservationItemRequest(BaseModel):
 class CreateReservationRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=160)
     items: list[ReservationItemRequest] = Field(min_length=1)
-    idempotency_key: str
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
 
 class ReservationLineResponse(BaseModel):
     product_id: UUID
@@ -25,12 +25,20 @@ class ReservationLineResponse(BaseModel):
     status: ReservationLineStatus
 
 
-class CreateReservationResponse(BaseModel):
+class ReservationResponse(BaseModel):
     reservation_id: UUID
     status: ReservationStatus
     expires_at: datetime
     payment_allowed: bool
     lines: list[ReservationLineResponse]
+
+
+class CreateReservationResponse(ReservationResponse):
+    pass
+
+
+class ConfirmReservationResponse(ReservationResponse):
+    order_id: UUID
 
 
 class ErrorResponse(BaseModel):
