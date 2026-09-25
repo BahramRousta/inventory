@@ -4,10 +4,10 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from app.application.services.expire_reserving_reservation import (
+from app.application.services.expiry.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
-from app.application.services.process_releasing_reservation import (
+from app.application.services.cancel.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
 from app.domain.enums import (
