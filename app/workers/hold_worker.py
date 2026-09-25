@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from app.application.services.claim_pending_provider_holds import (
+from app.application.services.create.claim_pending_provider_holds import (
     ClaimPendingProviderHoldsService,
 )
 from app.bootstrap.config import get_settings
