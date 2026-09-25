@@ -119,4 +119,8 @@ async def release_hold(
         if hold is None:
             raise HTTPException(status_code=404, detail="hold not found")
         hold.released = True
+
+    if _mode == "timeout_after_side_effect":
+        await asyncio.sleep(get_settings().fake_provider_timeout_seconds)
+
     return {"status": "RELEASED"}
