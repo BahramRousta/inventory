@@ -1238,3 +1238,59 @@ async def test_multi_item_payment_success_creates_one_order_with_all_immutable_l
     assert second_stock is not None
     assert second_stock.on_hand == 3
     assert second_stock.held == 0
+
+
+async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="CANONICAL-IDEMPOTENCY", on_hand=5
+    )
+    duplicate_body = {
+        "items": [
+            {
+                "product_id": str(source.product_id),
+                "stock_source_id": str(source.source_id),
+                "quantity": 1,
+            },
+            {
+                "product_id": str(source.product_id),
+                "stock_source_id": str(source.source_id),
+                "quantity": 2,
+            },
+        ]
+    }
+    canonical_body = create_body(source, quantity=3)
+
+    async with api_client(postgres_session_factory) as client:
+        first = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="canonical-key"),
+            json=duplicate_body,
+        )
+        replay = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="canonical-key"),
+            json=canonical_body,
+        )
+
+    assert first.status_code == 201
+    assert replay.status_code == 200
+    assert first.json()["reservation_id"] == replay.json()["reservation_id"]
+
+    reservation_id = UUID(first.json()["reservation_id"])
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+        stock = await session.get(InternalStockModel, source.source_id)
+
+    assert reservation is not None
+    assert reservation.request_fingerprint
+    assert line is not None
+    assert line.quantity == 3
+    assert stock is not None
+    assert stock.held == 3
