@@ -27,6 +27,7 @@ independent HTTP process.
 | Cancel | duplicate cancellation does not double-release | `test_reservation_api_postgres.py` |
 | Cancel | confirmed reservation cannot be cancelled | `test_reservation_api_postgres.py` |
 | Payment | SUCCESS consumes internal hold and creates exactly one order + lines | `test_reservation_api_postgres.py` |
+| Payment | multi-item SUCCESS creates one order containing every immutable line | `test_reservation_api_postgres.py` |
 | Payment | duplicate event ID/same payload is idempotent | `test_reservation_api_postgres.py` |
 | Payment | reused event ID/different payload conflicts | `test_reservation_api_postgres.py` |
 | Payment | separate contradictory FAILURE after success is rejected | `test_reservation_api_postgres.py` |
@@ -40,6 +41,7 @@ independent HTTP process.
 | External HOLD | definitive provider decline -> compensation -> CANCELLED | `test_external_provider_postgres.py` |
 | External HOLD | timeout after upstream side effect -> HOLD_UNKNOWN | `test_external_provider_postgres.py` |
 | Reconciliation | GET_HOLD resolves ambiguous hold to HELD/ACTIVE | `test_external_provider_postgres.py` |
+| Reconciliation | payment failure during HOLD_UNKNOWN discovers then releases the real remote hold | `test_external_provider_postgres.py` |
 | External RELEASE | cancel releases upstream hold and persists RELEASED | `test_external_provider_postgres.py` |
 | Mixed sources | external decline compensates successful internal hold; no order | `test_external_provider_postgres.py` |
 | External finalization | successful HOLD is snapshotted as final allocation in order line | `test_external_provider_postgres.py` |
@@ -47,9 +49,12 @@ independent HTTP process.
 | Pre-HOLD cancel | user cancel before provider call terminates pending work | `test_external_provider_postgres.py` |
 | Pre-HOLD expiry | TTL before provider call ends EXPIRED without remote hold | `test_external_provider_postgres.py` |
 | Concurrency | two API checkouts compete for last unit; exactly one wins | `test_postgres_concurrency.py` |
-| Worker claims | concurrent SKIP LOCKED claimers get different work | `test_postgres_concurrency.py` |
+| Worker claims | concurrent SKIP LOCKED claimers get different lines for the same provider | `test_postgres_concurrency.py` |
 | Lease recovery | stale claim becomes UNKNOWN exactly once | `test_postgres_concurrency.py` |
 | Payment/expiry | concurrent transition attempts preserve one local outcome | `test_postgres_concurrency.py` |
+| Idempotency race | concurrent same create key produces one reservation/hold | `test_postgres_concurrency.py` |
+| Payment race | concurrent delivery of the same event ID creates one event/order | `test_postgres_concurrency.py` |
+| Payment/expiry | expired database TTL wins and late success is rejected | `test_postgres_concurrency.py` |
 
 Run:
 
