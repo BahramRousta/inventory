@@ -1,5 +1,5 @@
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -13,34 +13,21 @@ from app.infrastructure.db.models import (
 from app.infrastructure.db.session import get_session
 
 
+DEMO_EXTERNAL_PROVIDER_ID = UUID("11111111-1111-1111-1111-111111111111")
+
 DEMO_PRODUCTS = (
     ("ANKR-HUB-7C", "Anker USB-C Hub 7-in-1", 10),
     ("LOGI-MX-M3S", "Logitech MX Master 3S", 25),
     ("SONY-WH-1000XM5", "Sony WH-1000XM5 Headphones", 12),
-    ("KINDLE-PW-11", "Kindle Paperwhite 11th Gen", 18),
 )
 
-DEMO_PROVIDERS = (
-    ("InternalStock", ProviderKind.INTERNAL),
-    ("DemoSupplierA", ProviderKind.EXTERNAL),
-    ("DemoSupplierB", ProviderKind.EXTERNAL),
-    ("DemoMarketplaceSeller", ProviderKind.EXTERNAL),
-)
-
-# A product may have several source-specific offers. The caller must send the
-# chosen stock_source_id, never the provider_id, when creating a reservation.
 DEMO_SOURCE_PLANS = (
     ("ANKR-HUB-7C", "InternalStock"),
-    ("ANKR-HUB-7C", "DemoSupplierA"),
-    ("ANKR-HUB-7C", "DemoSupplierB"),
+    ("ANKR-HUB-7C", "FakeExternalProvider"),
     ("LOGI-MX-M3S", "InternalStock"),
-    ("LOGI-MX-M3S", "DemoSupplierA"),
-    ("LOGI-MX-M3S", "DemoMarketplaceSeller"),
+    ("LOGI-MX-M3S", "FakeExternalProvider"),
     ("SONY-WH-1000XM5", "InternalStock"),
-    ("SONY-WH-1000XM5", "DemoSupplierB"),
-    ("SONY-WH-1000XM5", "DemoMarketplaceSeller"),
-    ("KINDLE-PW-11", "DemoSupplierA"),
-    ("KINDLE-PW-11", "DemoSupplierB"),
+    ("SONY-WH-1000XM5", "FakeExternalProvider"),
 )
 
 
@@ -49,23 +36,51 @@ async def main() -> None:
 
     async with get_session() as session:
         async with session.begin():
-            providers: dict[str, InventoryProviderModel] = {}
-            for provider_name, provider_kind in DEMO_PROVIDERS:
-                provider = await session.scalar(
-                    select(InventoryProviderModel).where(
-                        InventoryProviderModel.name == provider_name
-                    )
+            internal = await session.scalar(
+                select(InventoryProviderModel).where(
+                    InventoryProviderModel.name == "InternalStock"
                 )
-                if provider is None:
-                    provider = InventoryProviderModel(
-                        id=uuid4(),
-                        name=provider_name,
-                        kind=provider_kind,
-                        enabled=True,
-                    )
-                    session.add(provider)
-                    await session.flush()
-                providers[provider_name] = provider
+            )
+            if internal is None:
+                internal = InventoryProviderModel(
+                    id=uuid4(),
+                    name="InternalStock",
+                    kind=ProviderKind.INTERNAL,
+                    enabled=True,
+                    supports_check=True,
+                    supports_hold=True,
+                    supports_release=True,
+                    supports_get_hold=True,
+                    hold_is_final_allocation=True,
+                    config_key="internal",
+                )
+                session.add(internal)
+                await session.flush()
+
+            external = await session.get(
+                InventoryProviderModel, DEMO_EXTERNAL_PROVIDER_ID
+            )
+            if external is None:
+                external = InventoryProviderModel(
+                    id=DEMO_EXTERNAL_PROVIDER_ID,
+                    name="FakeExternalProvider",
+                    kind=ProviderKind.EXTERNAL,
+                    enabled=True,
+                    supports_check=True,
+                    supports_hold=True,
+                    supports_release=True,
+                    supports_get_hold=True,
+                    hold_is_final_allocation=True,
+                    config_key="fake-http",
+                    credential_ref=None,
+                )
+                session.add(external)
+                await session.flush()
+
+            providers = {
+                "InternalStock": internal,
+                "FakeExternalProvider": external,
+            }
 
             products: dict[str, tuple[ProductModel, int]] = {}
             for sku, name, on_hand in DEMO_PRODUCTS:
@@ -98,15 +113,16 @@ async def main() -> None:
                     session.add(source)
                     await session.flush()
 
-                stock = await session.get(InternalStockModel, source.id)
-                if provider.kind == ProviderKind.INTERNAL and stock is None:
-                    session.add(
-                        InternalStockModel(
-                            stock_source_id=source.id,
-                            on_hand=on_hand,
-                            held=0,
+                if provider.kind == ProviderKind.INTERNAL:
+                    stock = await session.get(InternalStockModel, source.id)
+                    if stock is None:
+                        session.add(
+                            InternalStockModel(
+                                stock_source_id=source.id,
+                                on_hand=on_hand,
+                                held=0,
+                            )
                         )
-                    )
 
                 seeded_sources.append(
                     (
@@ -118,7 +134,8 @@ async def main() -> None:
                     )
                 )
 
-    print("Seeded sources; POST /reservations requires stock_source_id, not provider_id:")
+    print("EXTERNAL_PROVIDER_ID=11111111-1111-1111-1111-111111111111")
+    print("Seeded source-specific inventory:")
     for sku, product_id, provider_name, provider_id, source_id in seeded_sources:
         print(
             f"sku={sku} product_id={product_id} provider={provider_name} "
