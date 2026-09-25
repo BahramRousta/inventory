@@ -98,8 +98,9 @@ becomes `EXPIRED`, not `CANCELLED`.
 
 ## Mock provider scenarios
 
-The assignment uses `MockReservationProviderGateway` instead of a real remote
-provider adapter. Tests configure deterministic outcomes:
+The assignment uses simple `InventoryProvider` implementations instead of a
+real remote adapter. Both query-style and hold-style providers expose the same
+`reserve(...)` method. Tests configure deterministic outcomes:
 
 - HOLD -> `HELD`, `DECLINED`, or `UNKNOWN`;
 - RELEASE -> `RELEASED` or `UNKNOWN`;
