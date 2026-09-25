@@ -8,9 +8,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
-    InMemoryProviderGatewayRegistry,
-    ProviderCapabilities,
     ProviderGatewayRegistry,
+    ProviderRegistry,
 )
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
@@ -126,7 +125,7 @@ def install_api_overrides(
     provider_gateways: ProviderGatewayRegistry | None = None,
     ttl_seconds: int = 900,
 ) -> None:
-    registry = provider_gateways or InMemoryProviderGatewayRegistry()
+    registry = provider_gateways or ProviderRegistry()
     make_uow = uow_factory(factory)
 
     app.dependency_overrides[get_create_reservation_service] = lambda: CreateReservationService(
@@ -208,24 +207,9 @@ async def reservation_line_count(factory) -> int:
         )
 
 
-class CapabilityOnlyGateway:
-    """Test double used only to verify adapter-declared capability gating."""
-
-    def __init__(self, capabilities: ProviderCapabilities) -> None:
-        self.capabilities = capabilities
-
-    async def hold(self, **kwargs):
-        raise AssertionError("capability-only gateway must not be called")
-
-    async def release(self, **kwargs):
-        raise AssertionError("capability-only gateway must not be called")
-
-    async def get_hold(self, **kwargs):
-        raise AssertionError("capability-only gateway must not be called")
+def reservation_registry(provider_id: UUID, gateway) -> ProviderRegistry:
+    return ProviderRegistry(reservation_providers={provider_id: gateway})
 
 
-def registry_with_capabilities(
-    provider_id: UUID,
-    capabilities: ProviderCapabilities,
-) -> InMemoryProviderGatewayRegistry:
-    return InMemoryProviderGatewayRegistry({provider_id: CapabilityOnlyGateway(capabilities)})
+def availability_only_registry(provider_id: UUID, gateway) -> ProviderRegistry:
+    return ProviderRegistry(availability_providers={provider_id: gateway})
