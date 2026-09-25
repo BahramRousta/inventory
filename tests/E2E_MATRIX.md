@@ -2,8 +2,8 @@
 
 All tests in this matrix use a real PostgreSQL database through
 `TEST_DATABASE_URL`. Every E2E/API scenario asserts persisted database state,
-not only HTTP responses. Provider scenarios launch `app.fake_provider` as an
-independent HTTP process.
+not only HTTP responses. Provider scenarios use configurable capability-specific mock gateways; all
+reservation/worker persistence still uses real PostgreSQL.
 
 | Area | Scenario | Main test file |
 |---|---|---|
@@ -18,8 +18,8 @@ independent HTTP process.
 | Idempotency | identical settled replay returns same reservation without a second hold | `test_reservation_api_postgres.py` |
 | Idempotency | changed body with same key conflicts | `test_reservation_api_postgres.py` |
 | Idempotency | pending external replay stays 202 and creates one work item | `test_external_provider_postgres.py` |
-| Provider eligibility | insufficient provider capabilities rejected | `test_reservation_api_postgres.py` |
-| Provider eligibility | configured capabilities but missing gateway rejected | `test_reservation_api_postgres.py` |
+| Provider eligibility | query-only provider rejected for reservation workflow | `test_reservation_api_postgres.py` |
+| Provider eligibility | missing reservation gateway rejected | `test_reservation_api_postgres.py` |
 | Read | owner sees persisted snapshot | `test_reservation_api_postgres.py` |
 | Read | missing reservation / wrong owner returns 404 | `test_reservation_api_postgres.py` |
 | Cancel | ACTIVE internal -> RELEASING -> CANCELLED and hold released once | `test_reservation_api_postgres.py` |
@@ -37,18 +37,14 @@ independent HTTP process.
 | Expiry | late success cannot resurrect EXPIRED reservation | `test_reservation_api_postgres.py` |
 | Direct confirm | deprecated admin flow finalizes once and is owner-scoped | `test_reservation_api_postgres.py` |
 | Direct confirm | expired reservation cannot be confirmed | `test_reservation_api_postgres.py` |
-| External HOLD | real fake-HTTP provider success -> ACTIVE + external ref | `test_external_provider_postgres.py` |
+| External HOLD | mock reservation provider success -> ACTIVE + external ref | `test_external_provider_postgres.py` |
 | External HOLD | definitive provider decline -> compensation -> CANCELLED | `test_external_provider_postgres.py` |
-| External HOLD | timeout after upstream side effect -> HOLD_UNKNOWN | `test_external_provider_postgres.py` |
+| External HOLD | mock ambiguous outcome -> HOLD_UNKNOWN | `test_external_provider_postgres.py` |
 | Reconciliation | GET_HOLD resolves ambiguous hold to HELD/ACTIVE | `test_external_provider_postgres.py` |
-| Reconciliation | payment failure during HOLD_UNKNOWN discovers then releases the real remote hold | `test_external_provider_postgres.py` |
 | External RELEASE | cancel releases upstream hold and persists RELEASED | `test_external_provider_postgres.py` |
-| External RELEASE | timeout after remote release -> RELEASE_UNKNOWN -> reconciliation -> CANCELLED | `test_external_provider_postgres.py` |
-| Mixed sources | external decline compensates successful internal hold; no order | `test_external_provider_postgres.py` |
-| External finalization | successful HOLD is snapshotted as final allocation in order line | `test_external_provider_postgres.py` |
+| External RELEASE | mock unknown release -> RELEASE_UNKNOWN -> reconciliation -> CANCELLED | `test_external_provider_postgres.py` |
+| External finalization | successful HOLD permits final local order creation | `test_external_provider_postgres.py` |
 | Pre-HOLD failure | payment failure before provider call terminates pending work without remote hold | `test_external_provider_postgres.py` |
-| Pre-HOLD cancel | user cancel before provider call terminates pending work | `test_external_provider_postgres.py` |
-| Pre-HOLD expiry | TTL before provider call ends EXPIRED without remote hold | `test_external_provider_postgres.py` |
 | Concurrency | two API checkouts compete for last unit; exactly one wins | `test_postgres_concurrency.py` |
 | Worker claims | concurrent SKIP LOCKED claimers get different lines for the same provider | `test_postgres_concurrency.py` |
 | Lease recovery | stale claim becomes UNKNOWN exactly once | `test_postgres_concurrency.py` |
