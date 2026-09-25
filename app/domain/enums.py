@@ -1,0 +1,62 @@
+from enum import StrEnum, Enum
+
+
+class ProviderKind(StrEnum):
+    INTERNAL = "INTERNAL"
+    EXTERNAL = "EXTERNAL"
+
+
+class ProviderCapability(StrEnum):
+    CHECK = "CHECK"
+    HOLD = "HOLD"
+    CONFIRM = "CONFIRM"
+    RELEASE = "RELEASE"
+    GET_HOLD = "GET_HOLD"
+
+
+class ReservationStatus(StrEnum):
+    RESERVING = "RESERVING"
+    ACTIVE = "ACTIVE"
+    CONFIRMING = "CONFIRMING"
+    RELEASING = "RELEASING"
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+
+
+class ReservationLineStatus(StrEnum):
+    HOLD_PENDING = "HOLD_PENDING"
+    HOLD_UNKNOWN = "HOLD_UNKNOWN"
+    HELD = "HELD"
+
+    CONFIRM_PENDING = "CONFIRM_PENDING"
+    CONFIRM_UNKNOWN = "CONFIRM_UNKNOWN"
+    CONFIRMED = "CONFIRMED"
+
+    RELEASE_PENDING = "RELEASE_PENDING"
+    RELEASE_UNKNOWN = "RELEASE_UNKNOWN"
+    RELEASED = "RELEASED"
+
+    FAILED = "FAILED"
+
+
+class ProviderOperationType(StrEnum):
+    HOLD = "HOLD"
+    CONFIRM = "CONFIRM"
+    RELEASE = "RELEASE"
+    CHECK = "CHECK"
+
+
+class ProviderOperationStatus(StrEnum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUCCEEDED = "SUCCEEDED"
+    DECLINED = "DECLINED"
+    UNKNOWN = "UNKNOWN"
+    RETRYABLE = "RETRYABLE"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class PaymentOutcome(StrEnum):
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"

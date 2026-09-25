@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: reservation
+      POSTGRES_PASSWORD: reservation
+      POSTGRES_DB: reservation
+    ports:
+      - "5454:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reservation -d reservation"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - reservation_pg:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+      RESERVATION_TTL_SECONDS: 900
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  reservation_pg:
