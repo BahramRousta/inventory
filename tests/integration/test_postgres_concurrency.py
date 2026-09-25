@@ -19,8 +19,10 @@ from app.domain.enums import (
 from app.infrastructure.db.models import (
     InternalStockModel,
     OrderModel,
+    ProductModel,
     ReservationLineModel,
     ReservationModel,
+    StockSourceModel,
 )
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from tests.e2e.support import (
@@ -88,10 +90,25 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
         postgres_session_factory,
         sku="CLAIM-A",
     )
-    second_source = await seed_external_source(
-        postgres_session_factory,
-        sku="CLAIM-B",
-    )
+    second_product_id = uuid4()
+    second_source_id = uuid4()
+    async with postgres_session_factory.begin() as session:
+        session.add(
+            ProductModel(
+                id=second_product_id,
+                sku="CLAIM-B",
+                name="CLAIM-B product",
+            )
+        )
+        session.add(
+            StockSourceModel(
+                id=second_source_id,
+                product_id=second_product_id,
+                provider_id=first_source.provider_id,
+                provider_sku="CLAIM-B",
+                enabled=True,
+            )
+        )
     first_reservation = uuid4()
     second_reservation = uuid4()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -123,7 +140,7 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
                 ),
                 ReservationLineModel(
                     reservation_id=second_reservation,
-                    stock_source_id=second_source.source_id,
+                    stock_source_id=second_source_id,
                     quantity=1,
                     status=ReservationLineStatus.HOLD_PENDING,
                 ),
