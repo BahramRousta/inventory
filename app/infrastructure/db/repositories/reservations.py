@@ -158,6 +158,21 @@ class SqlAlchemyReservationRepository:
         await self._session.flush()
         return result.rowcount == 1
 
+    async def fail_pending_hold_for_release(
+        self, reservation_id: UUID, stock_source_id: UUID
+    ) -> bool:
+        result = await self._session.execute(
+            update(ReservationLineModel)
+            .where(
+                ReservationLineModel.reservation_id == reservation_id,
+                ReservationLineModel.stock_source_id == stock_source_id,
+                ReservationLineModel.status == ReservationLineStatus.HOLD_PENDING,
+            )
+            .values(status=ReservationLineStatus.FAILED)
+        )
+        await self._session.flush()
+        return result.rowcount == 1
+
     async def claim_line_for_release(
         self, reservation_id: UUID, stock_source_id: UUID
     ) -> bool:
