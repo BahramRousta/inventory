@@ -33,11 +33,5 @@ class SqlAlchemyStockSourceRepository:
                 provider_kind=provider.kind,
                 provider_enabled=provider.enabled,
                 source_enabled=source.enabled,
-                supports_check=provider.supports_check,
-                supports_hold=provider.supports_hold,
-                supports_release=provider.supports_release,
-                supports_get_hold=provider.supports_get_hold,
-                hold_is_final_allocation=provider.hold_is_final_allocation,
-                credential_ref=provider.credential_ref,
             )
         return result
