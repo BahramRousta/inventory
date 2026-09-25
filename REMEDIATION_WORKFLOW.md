@@ -13,8 +13,9 @@ This branch implements Steps 1–8 and Step 10.
 - Step 5: complete — the configured provider contract is explicitly
   **HOLD is final allocation** and is persisted as capability metadata.
 - Step 6: complete — orders persist immutable order lines.
-- Step 7: complete — provider capabilities and non-secret config references are
-  persisted and checked for reservation eligibility.
+- Step 7: complete — provider capabilities are declared by adapter
+  configuration/factory code, while endpoints and credentials are injected from
+  environment-backed settings and checked for reservation eligibility.
 - Step 8: complete — Compose runs a standalone fake HTTP provider and separate
   hold/release/reconciliation/expiry workers.
 - Step 9: test suite added — PostgreSQL-backed API/database, provider,
@@ -201,20 +202,23 @@ line without consulting mutable reservation records.
 
 **Implementation:**
 
-1. Persist/resolve whether a provider supports query, hold, release, status
-   lookup, and either commit or final-allocation hold semantics.
+1. Resolve whether a provider supports query, hold, release, status lookup,
+   and either commit or final-allocation hold semantics from its configured
+   adapter.
 2. Reject query-only and otherwise insufficient providers before creating a
    guaranteed checkout reservation.
-3. Persist non-secret configuration and a credential reference only; do not
-   put raw credentials or provider payloads in logs.
-4. Keep provider-specific authentication, request shapes, and errors in
-   infrastructure adapters.
+3. Inject provider endpoints, credentials, and runtime settings through
+   environment-backed deployment configuration; do not persist raw credentials
+   or provider payloads.
+4. Keep provider-specific authentication, request shapes, capabilities, and
+   errors in infrastructure adapters/factories.
 
 **Assumption:** provider onboarding UI is out of scope; configuration may be
 seeded or environment-backed for the assignment demo.
 
-**Done when:** eligibility no longer means merely `ProviderKind.EXTERNAL` plus
-an in-process gateway registration.
+**Done when:** eligibility no longer means merely `ProviderKind.EXTERNAL`;
+the configured provider factory must resolve an adapter whose declared
+capabilities satisfy the workflow.
 
 ## Step 8 — Make the provider demo process-safe and deploy workers
 

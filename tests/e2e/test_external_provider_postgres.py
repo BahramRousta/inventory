@@ -24,9 +24,7 @@ from app.application.services.reconcile_provider_work import ReconcileProviderWo
 from app.domain.enums import ReservationLineStatus, ReservationStatus
 from app.infrastructure.db.models import (
     InternalStockModel,
-    OrderLineModel,
     OrderModel,
-    PaymentEventModel,
     ReservationLineModel,
     ReservationModel,
 )
@@ -420,7 +418,7 @@ async def test_mixed_source_external_decline_compensates_internal_hold_and_creat
     assert order_count == 0
 
 
-async def test_external_payment_success_uses_hold_as_final_allocation_and_snapshots_reference(
+async def test_external_payment_success_uses_hold_as_final_allocation_and_creates_order(
     postgres_session_factory,
     fake_provider_url,
 ):
@@ -471,17 +469,15 @@ async def test_external_payment_success_uses_hold_as_final_allocation_and_snapsh
                 ReservationLineModel.reservation_id == work.reservation_id
             )
         )
-        order_line = await session.scalar(
-            select(OrderLineModel).where(OrderLineModel.order_id == order_id)
-        )
+        order = await session.get(OrderModel, order_id)
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
     assert line is not None
     assert line.status == ReservationLineStatus.CONFIRMED
-    assert order_line is not None
-    assert order_line.provider_id == source.provider_id
-    assert order_line.provider_allocation_ref == original_ref
+    assert line.external_hold_ref == original_ref
+    assert order is not None
+    assert order.reservation_id == work.reservation_id
 
     hold_key = f"{work.reservation_id}:{source.source_id}:HOLD"
     async with httpx.AsyncClient(timeout=1.0) as client:
@@ -582,7 +578,6 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
         order_count = await session.scalar(
             select(func.count()).select_from(OrderModel)
         )
-        payment_event = await session.get(PaymentEventModel, event_id)
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert reservation.release_reason == "PAYMENT_FAILED"
@@ -590,8 +585,6 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
     assert line.status == ReservationLineStatus.FAILED
     assert line.external_hold_ref is None
     assert order_count == 0
-    assert payment_event is not None
-    assert payment_event.outcome.value == "FAILURE"
 
     hold_key = f"{reservation_id}:{source.source_id}:HOLD"
     async with httpx.AsyncClient(timeout=1.0) as client:

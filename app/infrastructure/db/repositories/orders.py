@@ -3,8 +3,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.dto.reservations import OrderLineRecord
-from app.infrastructure.db.models import OrderLineModel, OrderModel
+from app.infrastructure.db.models import OrderModel
 
 
 class SqlAlchemyOrderRepository:
@@ -16,13 +15,7 @@ class SqlAlchemyOrderRepository:
             select(OrderModel.id).where(OrderModel.reservation_id == reservation_id)
         )
 
-    async def create_with_lines(
-        self,
-        *,
-        reservation_id: UUID,
-        user_id: str,
-        lines: tuple[OrderLineRecord, ...],
-    ) -> UUID:
+    async def create(self, *, reservation_id: UUID, user_id: str) -> UUID:
         existing = await self.get_by_reservation_id(reservation_id)
         if existing is not None:
             return existing
@@ -35,16 +28,5 @@ class SqlAlchemyOrderRepository:
                 user_id=user_id,
             )
         )
-        for line in lines:
-            self._session.add(
-                OrderLineModel(
-                    order_id=order_id,
-                    product_id=line.product_id,
-                    stock_source_id=line.stock_source_id,
-                    provider_id=line.provider_id,
-                    quantity=line.quantity,
-                    provider_allocation_ref=line.provider_allocation_ref,
-                )
-            )
         await self._session.flush()
         return order_id

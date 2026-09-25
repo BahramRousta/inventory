@@ -17,7 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
-from app.domain.enums import PaymentOutcome, ProviderKind, ReservationLineStatus, ReservationStatus
+from app.domain.enums import ProviderKind, ReservationLineStatus, ReservationStatus
 
 
 def utcnow() -> datetime:
@@ -140,25 +140,6 @@ class ReservationLineModel(Base):
     )
 
 
-class PaymentEventModel(Base):
-    __tablename__ = "payment_events"
-
-    event_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
-    reservation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("reservations.id", ondelete="RESTRICT"), nullable=False
-    )
-    user_id: Mapped[str] = mapped_column(String(160), nullable=False)
-    outcome: Mapped[PaymentOutcome] = mapped_column(
-        Enum(PaymentOutcome, native_enum=False, length=16), nullable=False
-    )
-    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow
-    )
-
-    __table_args__ = (Index("ix_payment_event_reservation", "reservation_id"),)
-
-
 class OrderModel(Base):
     __tablename__ = "orders"
 
@@ -171,27 +152,3 @@ class OrderModel(Base):
         DateTime(timezone=True), nullable=False, default=utcnow
     )
 
-
-class OrderLineModel(Base):
-    __tablename__ = "order_lines"
-
-    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    order_id: Mapped[UUID] = mapped_column(
-        ForeignKey("orders.id", ondelete="RESTRICT"), nullable=False
-    )
-    product_id: Mapped[UUID] = mapped_column(
-        ForeignKey("products.id", ondelete="RESTRICT"), nullable=False
-    )
-    stock_source_id: Mapped[UUID] = mapped_column(
-        ForeignKey("stock_sources.id", ondelete="RESTRICT"), nullable=False
-    )
-    provider_id: Mapped[UUID] = mapped_column(
-        ForeignKey("inventory_providers.id", ondelete="RESTRICT"), nullable=False
-    )
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    provider_allocation_ref: Mapped[str | None] = mapped_column(String(255))
-
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_order_line_quantity_positive"),
-        UniqueConstraint("order_id", "stock_source_id", name="uq_order_line_source"),
-    )

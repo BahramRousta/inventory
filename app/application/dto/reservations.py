@@ -103,24 +103,6 @@ class PendingExternalReleaseRecord:
 
 
 @dataclass(frozen=True)
-class OrderLineRecord:
-    product_id: UUID
-    stock_source_id: UUID
-    provider_id: UUID
-    quantity: int
-    provider_allocation_ref: str | None = None
-
-
-@dataclass(frozen=True)
-class PaymentEventRecord:
-    event_id: UUID
-    reservation_id: UUID
-    user_id: str
-    outcome: PaymentOutcome
-    payload_hash: str
-
-
-@dataclass(frozen=True)
 class CreateReservationResult:
     reservation_id: UUID
     status: ReservationStatus
