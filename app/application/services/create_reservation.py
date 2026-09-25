@@ -11,13 +11,8 @@ from app.application.errors import (
     PersistenceConflict,
     ProductSourceMismatch,
     SourceDisabled,
-    SourceNotReservable,
 )
 from app.application.ports.clock import Clock
-from app.application.ports.provider_gateway import (
-    ProviderGatewayRegistry,
-    ProviderRegistry,
-)
 from app.application.ports.repositories import UnitOfWork
 from app.domain.enums import ProviderKind, ReservationLineStatus, ReservationStatus
 
@@ -36,12 +31,10 @@ class CreateReservationService:
         uow_factory: Callable[[], UnitOfWork],
         clock: Clock,
         ttl_seconds: int,
-        provider_gateways: ProviderGatewayRegistry | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ttl_seconds = ttl_seconds
-        self._provider_gateways = provider_gateways or ProviderRegistry()
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
         items = command.items
@@ -122,12 +115,6 @@ class CreateReservationService:
                 )
             if not source.source_enabled or not source.provider_enabled:
                 raise SourceDisabled(f"Source {item.stock_source_id} is disabled.")
-            if source.provider_kind == ProviderKind.EXTERNAL:
-                gateway = self._provider_gateways.get_reservation_provider(source.provider_id)
-                if gateway is None:
-                    raise SourceNotReservable(
-                        f"Provider {source.provider_id} has no configured gateway."
-                    )
 
 
 def _result(reservation, lines, *, replayed: bool) -> CreateReservationResult:
