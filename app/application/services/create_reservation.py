@@ -50,9 +50,7 @@ class CreateReservationService:
         self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
-        items = _canonicalize_items(command.items)
-        request_fingerprint = _request_fingerprint(items)
-
+        items = command.items
         try:
             async with self._uow_factory() as uow:
                 existing = await uow.reservations.get_by_idempotency_key(
@@ -60,7 +58,6 @@ class CreateReservationService:
                 )
                 if existing is not None:
                     lines = await uow.reservations.get_lines(existing.reservation_id)
-                    self._assert_same_request(existing.request_fingerprint, lines, items)
                     return _result(existing, lines, replayed=True)
 
                 sources = await uow.stock_sources.get_many(
@@ -76,7 +73,6 @@ class CreateReservationService:
                     reservation_id=reservation_id,
                     user_id=command.user_id,
                     idempotency_key=command.idempotency_key,
-                    request_fingerprint=request_fingerprint,
                     expires_at=expires_at,
                     status=ReservationStatus.RESERVING,
                 )
@@ -116,7 +112,6 @@ class CreateReservationService:
                 if existing is None:
                     raise
                 lines = await uow.reservations.get_lines(existing.reservation_id)
-                self._assert_same_request(existing.request_fingerprint, lines, items)
                 return _result(existing, lines, replayed=True)
 
     async def _load_result(
@@ -127,27 +122,6 @@ class CreateReservationService:
             assert reservation is not None
             lines = await uow.reservations.get_lines(reservation_id)
             return _result(reservation, lines, replayed=replayed)
-
-    @staticmethod
-    def _assert_same_request(
-        stored_fingerprint: str | None,
-        stored_lines: tuple[ReservationLineResult, ...],
-        requested_items: tuple[ReservationItemCommand, ...],
-    ) -> None:
-        effective = stored_fingerprint or _request_fingerprint(
-            tuple(
-                ReservationItemCommand(
-                    product_id=line.product_id,
-                    stock_source_id=line.stock_source_id,
-                    quantity=line.quantity,
-                )
-                for line in stored_lines
-            )
-        )
-        if effective != _request_fingerprint(requested_items):
-            raise IdempotencyConflict(
-                "Idempotency key was already used with a different reservation body."
-            )
 
     def _validate_sources(self, items, sources) -> None:
         for item in items:
@@ -169,45 +143,6 @@ class CreateReservationService:
                         f"Provider {source.provider_id} does not support the required "
                         "hold/release/status/final-allocation contract."
                     )
-
-
-def _canonicalize_items(
-    items: tuple[ReservationItemCommand, ...],
-) -> tuple[ReservationItemCommand, ...]:
-    if not items:
-        raise InvalidReservationItems("At least one reservation item is required.")
-
-    totals: dict[tuple[UUID, UUID], int] = {}
-    for item in items:
-        if item.quantity <= 0:
-            raise InvalidReservationItems("Reservation quantity must be positive.")
-        key = (item.product_id, item.stock_source_id)
-        total = totals.get(key, 0) + item.quantity
-        if total > _MAX_QUANTITY:
-            raise InvalidReservationItems(
-                f"Combined quantity for source {item.stock_source_id} exceeds the supported range."
-            )
-        totals[key] = total
-
-    return tuple(
-        ReservationItemCommand(product_id=product_id, stock_source_id=source_id, quantity=quantity)
-        for (product_id, source_id), quantity in sorted(
-            totals.items(), key=lambda row: (str(row[0][0]), str(row[0][1]))
-        )
-    )
-
-
-def _request_fingerprint(items: tuple[ReservationItemCommand, ...]) -> str:
-    body = [
-        {
-            "product_id": str(item.product_id),
-            "stock_source_id": str(item.stock_source_id),
-            "quantity": item.quantity,
-        }
-        for item in items
-    ]
-    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _result(reservation, lines, *, replayed: bool) -> CreateReservationResult:
