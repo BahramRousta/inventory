@@ -158,18 +158,17 @@ class CreateReservationService:
                 )
             if not source.source_enabled or not source.provider_enabled:
                 raise SourceDisabled(f"Source {item.stock_source_id} is disabled.")
-            if not source.reservation_supported:
-                raise SourceNotReservable(
-                    f"Provider {source.provider_id} does not support the required "
-                    "hold/release/status/final-allocation contract."
-                )
-            if (
-                source.provider_kind == ProviderKind.EXTERNAL
-                and self._provider_gateways.get(source.provider_id) is None
-            ):
-                raise SourceNotReservable(
-                    f"Provider {source.provider_id} has no configured gateway."
-                )
+            if source.provider_kind == ProviderKind.EXTERNAL:
+                gateway = self._provider_gateways.get(source.provider_id)
+                if gateway is None:
+                    raise SourceNotReservable(
+                        f"Provider {source.provider_id} has no configured gateway."
+                    )
+                if not gateway.capabilities.supports_reservation_workflow:
+                    raise SourceNotReservable(
+                        f"Provider {source.provider_id} does not support the required "
+                        "hold/release/status/final-allocation contract."
+                    )
 
 
 def _canonicalize_items(
