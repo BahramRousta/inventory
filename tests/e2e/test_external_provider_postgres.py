@@ -211,6 +211,17 @@ async def test_timeout_after_provider_side_effect_stays_unknown_until_reconcilia
     assert line is not None
     assert line.status == ReservationLineStatus.HOLD_UNKNOWN
 
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        unknown_snapshot = await client.get(
+            f"/reservations/{work.reservation_id}",
+            headers=create_headers(user_id="user-1"),
+        )
+    assert unknown_snapshot.status_code == 200
+    assert unknown_snapshot.json()["requires_attention"] is True
+    assert unknown_snapshot.json()["payment_allowed"] is False
+
     async with httpx.AsyncClient(timeout=1.0) as client:
         provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
     assert provider_state.status_code == 200
@@ -243,6 +254,17 @@ async def test_timeout_after_provider_side_effect_stays_unknown_until_reconcilia
     assert line is not None
     assert line.status == ReservationLineStatus.HELD
     assert line.external_hold_ref == provider_state.json()["hold_ref"]
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        reconciled_snapshot = await client.get(
+            f"/reservations/{work.reservation_id}",
+            headers=create_headers(user_id="user-1"),
+        )
+    assert reconciled_snapshot.status_code == 200
+    assert reconciled_snapshot.json()["requires_attention"] is False
+    assert reconciled_snapshot.json()["payment_allowed"] is True
 
 
 async def test_external_cancel_releases_remote_hold_and_finishes_cancelled(
