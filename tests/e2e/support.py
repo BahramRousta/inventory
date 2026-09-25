@@ -10,10 +10,10 @@ from sqlalchemy import func, select
 from app.application.ports.provider_gateway import (
     ProviderRegistry,
 )
-from app.application.services.cancel_reservation import CancelReservationService
-from app.application.services.confirm_reservation import ConfirmReservationService
-from app.application.services.create_reservation import CreateReservationService
-from app.application.services.get_reservation import GetReservationService
+from app.application.services.cancel.cancel_reservation import CancelReservationService
+from app.application.services.confirm.confirm_reservation import ConfirmReservationService
+from app.application.services.create.create_reservation import CreateReservationService
+from app.application.services.inquiry.get_reservation import GetReservationService
 from app.bootstrap.dependencies import (
     get_cancel_reservation_service,
     get_confirm_reservation_service,
