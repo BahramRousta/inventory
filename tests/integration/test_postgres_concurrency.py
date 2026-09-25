@@ -434,3 +434,53 @@ async def test_expiry_wins_when_payment_success_arrives_after_database_ttl(
     assert stock.on_hand == 1
     assert stock.held == 1
     assert order_count == 0
+
+
+async def test_concurrent_same_create_idempotency_key_holds_stock_once(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory,
+        sku="CONCURRENT-CREATE-IDEMPOTENCY",
+        on_hand=3,
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        async def create_once():
+            return await client.post(
+                "/reservations",
+                headers=create_headers(
+                    user_id="same-user",
+                    idempotency_key="same-concurrent-key",
+                ),
+                json=create_body(source, quantity=2),
+            )
+
+        first, second = await asyncio.gather(create_once(), create_once())
+
+    assert sorted([first.status_code, second.status_code]) == [200, 201]
+    assert first.json()["reservation_id"] == second.json()["reservation_id"]
+
+    reservation_id = UUID(first.json()["reservation_id"])
+    async with postgres_session_factory() as session:
+        stock = await session.get(InternalStockModel, source.source_id)
+        reservation_count = await session.scalar(
+            select(func.count()).select_from(ReservationModel)
+        )
+        line_count = await session.scalar(
+            select(func.count()).select_from(ReservationLineModel)
+        )
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+
+    assert stock is not None
+    assert stock.on_hand == 3
+    assert stock.held == 2
+    assert reservation_count == 1
+    assert line_count == 1
+    assert line is not None
+    assert line.quantity == 2
+    assert line.status == ReservationLineStatus.HELD
