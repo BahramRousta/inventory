@@ -51,7 +51,6 @@ async def _claim_and_process_reservation(factory, registry):
 
     processed = await ProcessPendingProviderHoldService(
         uow_factory=uow_factory(factory),
-        providers=registry,
     ).execute(claimed[0])
     assert processed is True
     return claimed[0]
@@ -69,7 +68,6 @@ async def test_mock_reservation_provider_reserve_success_activates_reservation(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -113,7 +111,6 @@ async def test_mock_provider_decline_compensates_to_cancelled(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -164,7 +161,6 @@ async def test_unknown_reservation_is_reconciled_to_active(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -196,7 +192,6 @@ async def test_unknown_reservation_is_reconciled_to_active(
 
     reconciled = await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
-        providers=registry,
     ).reconcile_hold(unknown[0])
     assert reconciled is True
 
@@ -228,7 +223,6 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -240,7 +234,6 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         cancelled = await client.post(
             f"/reservations/{work.reservation_id}/cancel",
@@ -263,7 +256,6 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 
     persisted = await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
-        providers=registry,
     ).execute(releases[0])
     assert persisted is True
 
@@ -297,7 +289,6 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         await client.post(
             "/reservations",
@@ -309,7 +300,6 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         await client.post(
             f"/reservations/{work.reservation_id}/cancel",
@@ -329,7 +319,6 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
-        providers=registry,
     ).execute(releases[0])
 
     async with postgres_session_factory() as session:
@@ -356,7 +345,6 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
-        providers=registry,
     ).reconcile_release(unknown[0])
 
     async with postgres_session_factory() as session:
@@ -385,7 +373,6 @@ async def test_payment_success_on_external_hold_creates_single_order(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         await client.post(
             "/reservations",
@@ -397,7 +384,6 @@ async def test_payment_success_on_external_hold_creates_single_order(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         paid = await client.post(
             f"/reservations/{work.reservation_id}/payment-outcome",
@@ -438,7 +424,6 @@ async def test_payment_failure_before_provider_call_never_invokes_mock_hold(
 
     async with api_client(
         postgres_session_factory,
-        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
