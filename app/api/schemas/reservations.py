@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.domain.enums import PaymentOutcome, ReservationLineStatus, ReservationStatus
+from app.domain.enums import ReservationLineStatus, ReservationStatus
 
 
 class ReservationItemRequest(BaseModel):
@@ -15,10 +15,6 @@ class ReservationItemRequest(BaseModel):
 class CreateReservationRequest(BaseModel):
     items: list[ReservationItemRequest] = Field(min_length=1)
 
-
-class PaymentOutcomeRequest(BaseModel):
-    event_id: UUID
-    outcome: PaymentOutcome
 
 
 class ReservationLineResponse(BaseModel):
@@ -45,9 +41,6 @@ class CreateReservationResponse(ReservationResponse):
 class ConfirmReservationResponse(ReservationResponse):
     order_id: UUID
 
-
-class PaymentOutcomeResponse(ReservationResponse):
-    order_id: UUID | None = None
 
 
 class ErrorResponse(BaseModel):
