@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.dto.reservations import (
     ExternalReleaseRecord,
     PendingExternalHoldRecord,
+    ClaimedExternalHoldRecord,
+    ClaimedExternalReleaseRecord,
     PendingExternalReleaseRecord,
     ReservationIdentityRecord,
     ReservationItemCommand,
@@ -104,25 +106,33 @@ class SqlAlchemyReservationRepository:
         *,
         reservation_id: UUID,
         stock_source_id: UUID,
+        claim_token: UUID,
         status: ReservationLineStatus,
         external_hold_ref: str | None,
-    ) -> None:
-        values: dict[str, object] = {"status": status}
+    ) -> bool:
+        values: dict[str, object] = {
+            "status": status,
+            "provider_claim_token": None,
+            "provider_lease_until": None,
+        }
         if external_hold_ref is not None:
             values["external_hold_ref"] = external_hold_ref
         if status == ReservationLineStatus.HELD:
             values["held_at"] = datetime.now(timezone.utc)
 
-        await self._session.execute(
+        result = await self._session.execute(
             update(ReservationLineModel)
             .where(
                 ReservationLineModel.reservation_id == reservation_id,
                 ReservationLineModel.stock_source_id == stock_source_id,
-                ReservationLineModel.status == ReservationLineStatus.HOLD_PENDING,
+                ReservationLineModel.status == ReservationLineStatus.HOLD_IN_PROGRESS,
+                ReservationLineModel.provider_claim_token == claim_token,
+                ReservationLineModel.provider_lease_until > func.now(),
             )
             .values(**values)
         )
         await self._session.flush()
+        return result.rowcount == 1
 
     async def activate_if_all_lines_held(self, reservation_id: UUID) -> bool:
         has_non_held_line = exists(
@@ -204,21 +214,29 @@ class SqlAlchemyReservationRepository:
         *,
         reservation_id: UUID,
         stock_source_id: UUID,
+        claim_token: UUID,
         status: ReservationLineStatus,
-    ) -> None:
-        values: dict[str, object] = {"status": status}
+    ) -> bool:
+        values: dict[str, object] = {
+            "status": status,
+            "provider_claim_token": None,
+            "provider_lease_until": None,
+        }
         if status == ReservationLineStatus.RELEASED:
             values["released_at"] = datetime.now(timezone.utc)
-        await self._session.execute(
+        result = await self._session.execute(
             update(ReservationLineModel)
             .where(
                 ReservationLineModel.reservation_id == reservation_id,
                 ReservationLineModel.stock_source_id == stock_source_id,
-                ReservationLineModel.status == ReservationLineStatus.RELEASE_PENDING,
+                ReservationLineModel.status == ReservationLineStatus.RELEASE_IN_PROGRESS,
+                ReservationLineModel.provider_claim_token == claim_token,
+                ReservationLineModel.provider_lease_until > func.now(),
             )
             .values(**values)
         )
         await self._session.flush()
+        return result.rowcount == 1
 
     async def cancel_if_all_lines_resolved(self, reservation_id: UUID) -> bool:
         has_unresolved_line = exists(
@@ -301,6 +319,22 @@ class SqlAlchemyReservationRepository:
             is not None
         )
 
+    async def is_external_hold_claim_owned(
+        self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
+    ) -> bool:
+        return (
+            await self._session.scalar(
+                select(ReservationLineModel.id).where(
+                    ReservationLineModel.reservation_id == reservation_id,
+                    ReservationLineModel.stock_source_id == stock_source_id,
+                    ReservationLineModel.status == ReservationLineStatus.HOLD_IN_PROGRESS,
+                    ReservationLineModel.provider_claim_token == claim_token,
+                    ReservationLineModel.provider_lease_until > func.now(),
+                )
+            )
+            is not None
+        )
+
     async def begin_releasing_if_reserving(self, reservation_id: UUID) -> bool:
         result = await self._session.execute(
             update(ReservationModel)
@@ -322,6 +356,22 @@ class SqlAlchemyReservationRepository:
                     ReservationLineModel.reservation_id == reservation_id,
                     ReservationLineModel.stock_source_id == stock_source_id,
                     ReservationLineModel.status == ReservationLineStatus.RELEASE_PENDING,
+                )
+            )
+            is not None
+        )
+
+    async def is_external_release_claim_owned(
+        self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
+    ) -> bool:
+        return (
+            await self._session.scalar(
+                select(ReservationLineModel.id).where(
+                    ReservationLineModel.reservation_id == reservation_id,
+                    ReservationLineModel.stock_source_id == stock_source_id,
+                    ReservationLineModel.status == ReservationLineStatus.RELEASE_IN_PROGRESS,
+                    ReservationLineModel.provider_claim_token == claim_token,
+                    ReservationLineModel.provider_lease_until > func.now(),
                 )
             )
             is not None
@@ -453,6 +503,288 @@ class SqlAlchemyReservationRepository:
             .order_by(ReservationModel.updated_at, ReservationModel.id)
             .limit(1)
         )
+
+    async def claim_pending_external_holds(
+        self, *, limit: int, lease_seconds: int
+    ) -> tuple[ClaimedExternalHoldRecord, ...]:
+        database_now = _as_utc(await self._session.scalar(select(func.now())))
+        lease_until = database_now + timedelta(seconds=lease_seconds)
+        rows = (
+            await self._session.execute(
+                select(
+                    ReservationLineModel,
+                    StockSourceModel.provider_id,
+                    ReservationModel.expires_at,
+                )
+                .join(
+                    ReservationModel,
+                    ReservationModel.id == ReservationLineModel.reservation_id,
+                )
+                .join(
+                    StockSourceModel,
+                    StockSourceModel.id == ReservationLineModel.stock_source_id,
+                )
+                .join(
+                    InventoryProviderModel,
+                    InventoryProviderModel.id == StockSourceModel.provider_id,
+                )
+                .where(
+                    ReservationLineModel.status == ReservationLineStatus.HOLD_PENDING,
+                    ReservationModel.status == ReservationStatus.RESERVING,
+                    InventoryProviderModel.kind == ProviderKind.EXTERNAL,
+                )
+                .order_by(ReservationModel.created_at, ReservationLineModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+
+        claimed: list[ClaimedExternalHoldRecord] = []
+        for line, provider_id, expires_at in rows:
+            claim_token = uuid4()
+            line.status = ReservationLineStatus.HOLD_IN_PROGRESS
+            line.provider_claim_token = claim_token
+            line.provider_lease_until = lease_until
+            claimed.append(
+                ClaimedExternalHoldRecord(
+                    reservation_id=line.reservation_id,
+                    stock_source_id=line.stock_source_id,
+                    provider_id=provider_id,
+                    quantity=line.quantity,
+                    expires_at=_as_utc(expires_at),
+                    claim_token=claim_token,
+                )
+            )
+        await self._session.flush()
+        return tuple(claimed)
+
+    async def claim_pending_external_releases(
+        self, *, limit: int, lease_seconds: int
+    ) -> tuple[ClaimedExternalReleaseRecord, ...]:
+        return await self._claim_external_releases(
+            from_status=ReservationLineStatus.RELEASE_PENDING,
+            limit=limit,
+            lease_seconds=lease_seconds,
+        )
+
+    async def claim_unknown_external_holds(
+        self, *, limit: int, lease_seconds: int
+    ) -> tuple[ClaimedExternalHoldRecord, ...]:
+        return await self._claim_external_holds(
+            from_status=ReservationLineStatus.HOLD_UNKNOWN,
+            limit=limit,
+            lease_seconds=lease_seconds,
+        )
+
+    async def claim_unknown_external_releases(
+        self, *, limit: int, lease_seconds: int
+    ) -> tuple[ClaimedExternalReleaseRecord, ...]:
+        return await self._claim_external_releases(
+            from_status=ReservationLineStatus.RELEASE_UNKNOWN,
+            limit=limit,
+            lease_seconds=lease_seconds,
+        )
+
+    async def recover_expired_provider_claims(self, *, limit: int) -> int:
+        recovered = 0
+        for in_progress, unknown in (
+            (ReservationLineStatus.HOLD_IN_PROGRESS, ReservationLineStatus.HOLD_UNKNOWN),
+            (ReservationLineStatus.RELEASE_IN_PROGRESS, ReservationLineStatus.RELEASE_UNKNOWN),
+        ):
+            line_ids = (
+                await self._session.scalars(
+                    select(ReservationLineModel.id)
+                    .where(
+                        ReservationLineModel.status == in_progress,
+                        ReservationLineModel.provider_lease_until <= func.now(),
+                    )
+                    .order_by(ReservationLineModel.provider_lease_until)
+                    .limit(max(limit - recovered, 0))
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            if not line_ids:
+                continue
+            result = await self._session.execute(
+                update(ReservationLineModel)
+                .where(
+                    ReservationLineModel.id.in_(line_ids),
+                    ReservationLineModel.status == in_progress,
+                    ReservationLineModel.provider_lease_until <= func.now(),
+                )
+                .values(
+                    status=unknown,
+                    provider_claim_token=None,
+                    provider_lease_until=None,
+                )
+            )
+            recovered += result.rowcount
+            if recovered >= limit:
+                break
+        await self._session.flush()
+        return recovered
+
+    async def claim_expired_reserving_reservations(
+        self, *, limit: int
+    ) -> tuple[UUID, ...]:
+        reservation_ids = (
+            await self._session.scalars(
+                select(ReservationModel.id)
+                .where(
+                    ReservationModel.status == ReservationStatus.RESERVING,
+                    ReservationModel.expires_at <= func.now(),
+                )
+                .order_by(ReservationModel.expires_at, ReservationModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        if not reservation_ids:
+            return ()
+        await self._session.execute(
+            update(ReservationModel)
+            .where(
+                ReservationModel.id.in_(reservation_ids),
+                ReservationModel.status == ReservationStatus.RESERVING,
+                ReservationModel.expires_at <= func.now(),
+            )
+            .values(status=ReservationStatus.RELEASING, release_reason="EXPIRED")
+        )
+        await self._session.flush()
+        return tuple(reservation_ids)
+
+    async def return_hold_claim_to_unknown(
+        self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
+    ) -> bool:
+        return await self._return_claim(
+            reservation_id, stock_source_id, claim_token,
+            ReservationLineStatus.HOLD_IN_PROGRESS,
+            ReservationLineStatus.HOLD_UNKNOWN,
+        )
+
+    async def return_release_claim_to_unknown(
+        self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
+    ) -> bool:
+        return await self._return_claim(
+            reservation_id, stock_source_id, claim_token,
+            ReservationLineStatus.RELEASE_IN_PROGRESS,
+            ReservationLineStatus.RELEASE_UNKNOWN,
+        )
+
+    async def return_release_claim_to_pending(
+        self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
+    ) -> bool:
+        return await self._return_claim(
+            reservation_id, stock_source_id, claim_token,
+            ReservationLineStatus.RELEASE_IN_PROGRESS,
+            ReservationLineStatus.RELEASE_PENDING,
+        )
+
+    async def _return_claim(
+        self,
+        reservation_id: UUID,
+        stock_source_id: UUID,
+        claim_token: UUID,
+        from_status: ReservationLineStatus,
+        to_status: ReservationLineStatus,
+    ) -> bool:
+        result = await self._session.execute(
+            update(ReservationLineModel)
+            .where(
+                ReservationLineModel.reservation_id == reservation_id,
+                ReservationLineModel.stock_source_id == stock_source_id,
+                ReservationLineModel.status == from_status,
+                ReservationLineModel.provider_claim_token == claim_token,
+                ReservationLineModel.provider_lease_until > func.now(),
+            )
+            .values(
+                status=to_status,
+                provider_claim_token=None,
+                provider_lease_until=None,
+            )
+        )
+        await self._session.flush()
+        return result.rowcount == 1
+
+    async def _claim_external_holds(
+        self,
+        *,
+        from_status: ReservationLineStatus,
+        limit: int,
+        lease_seconds: int,
+    ) -> tuple[ClaimedExternalHoldRecord, ...]:
+        database_now = _as_utc(await self._session.scalar(select(func.now())))
+        lease_until = database_now + timedelta(seconds=lease_seconds)
+        rows = (
+            await self._session.execute(
+                select(
+                    ReservationLineModel,
+                    StockSourceModel.provider_id,
+                    ReservationModel.expires_at,
+                )
+                .join(ReservationModel, ReservationModel.id == ReservationLineModel.reservation_id)
+                .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
+                .join(InventoryProviderModel, InventoryProviderModel.id == StockSourceModel.provider_id)
+                .where(
+                    ReservationLineModel.status == from_status,
+                    InventoryProviderModel.kind == ProviderKind.EXTERNAL,
+                )
+                .order_by(ReservationModel.created_at, ReservationLineModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        claimed = []
+        for line, provider_id, expires_at in rows:
+            token = uuid4()
+            line.status = ReservationLineStatus.HOLD_IN_PROGRESS
+            line.provider_claim_token = token
+            line.provider_lease_until = lease_until
+            claimed.append(ClaimedExternalHoldRecord(
+                reservation_id=line.reservation_id, stock_source_id=line.stock_source_id,
+                provider_id=provider_id, quantity=line.quantity,
+                expires_at=_as_utc(expires_at), claim_token=token,
+            ))
+        await self._session.flush()
+        return tuple(claimed)
+
+    async def _claim_external_releases(
+        self,
+        *,
+        from_status: ReservationLineStatus,
+        limit: int,
+        lease_seconds: int,
+    ) -> tuple[ClaimedExternalReleaseRecord, ...]:
+        database_now = _as_utc(await self._session.scalar(select(func.now())))
+        lease_until = database_now + timedelta(seconds=lease_seconds)
+        rows = (
+            await self._session.execute(
+                select(ReservationLineModel, StockSourceModel.provider_id)
+                .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
+                .join(InventoryProviderModel, InventoryProviderModel.id == StockSourceModel.provider_id)
+                .where(
+                    ReservationLineModel.status == from_status,
+                    ReservationLineModel.external_hold_ref.is_not(None),
+                    InventoryProviderModel.kind == ProviderKind.EXTERNAL,
+                )
+                .order_by(ReservationLineModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        claimed = []
+        for line, provider_id in rows:
+            token = uuid4()
+            line.status = ReservationLineStatus.RELEASE_IN_PROGRESS
+            line.provider_claim_token = token
+            line.provider_lease_until = lease_until
+            claimed.append(ClaimedExternalReleaseRecord(
+                reservation_id=line.reservation_id, stock_source_id=line.stock_source_id,
+                provider_id=provider_id, external_hold_ref=line.external_hold_ref,
+                claim_token=token,
+            ))
+        await self._session.flush()
+        return tuple(claimed)
 
     async def _next_external_line_by_status(
         self,

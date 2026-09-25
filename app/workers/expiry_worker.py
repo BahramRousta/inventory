@@ -9,11 +9,12 @@ from app.infrastructure.db.session import AsyncSessionLocal
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 
 
-async def run_once() -> str | None:
-    reservation_id = await ExpireReservingReservationService(
+async def run_once() -> int:
+    settings = get_settings()
+    reservation_ids = await ExpireReservingReservationService(
         uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal)
-    ).execute_one()
-    return str(reservation_id) if reservation_id is not None else None
+    ).execute_batch(limit=settings.provider_worker_batch_size)
+    return len(reservation_ids)
 
 
 async def run_forever() -> None:

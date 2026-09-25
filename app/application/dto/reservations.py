@@ -64,6 +64,25 @@ class PendingExternalHoldRecord:
 
 
 @dataclass(frozen=True)
+class ClaimedExternalHoldRecord:
+    reservation_id: UUID
+    stock_source_id: UUID
+    provider_id: UUID
+    quantity: int
+    expires_at: datetime
+    claim_token: UUID
+
+
+@dataclass(frozen=True)
+class ClaimedExternalReleaseRecord:
+    reservation_id: UUID
+    stock_source_id: UUID
+    provider_id: UUID
+    external_hold_ref: str
+    claim_token: UUID
+
+
+@dataclass(frozen=True)
 class PendingExternalReleaseRecord:
     reservation_id: UUID
     stock_source_id: UUID

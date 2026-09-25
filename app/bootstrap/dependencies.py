@@ -3,14 +3,16 @@ from app.application.services.create_reservation import CreateReservationService
 from app.application.services.process_pending_provider_hold import (
     ProcessPendingProviderHoldService,
 )
+from app.application.services.process_claimed_provider_release import (
+    ProcessClaimedProviderReleaseService,
+)
 from app.application.services.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
 from app.application.services.reconcile_provider_work import ReconcileProviderWorkService
 from app.bootstrap.config import get_settings
 from app.infrastructure.clock import SystemClock
-from app.infrastructure.db.provider_work_lock import PostgresProviderWorkLock
-from app.infrastructure.db.session import AsyncSessionLocal, engine
+from app.infrastructure.db.session import AsyncSessionLocal
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from app.infrastructure.providers.external_hold_http import ExternalHoldHttpGateway
 
@@ -43,15 +45,19 @@ def get_process_pending_provider_hold_service() -> ProcessPendingProviderHoldSer
     return ProcessPendingProviderHoldService(
         uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
         provider_gateways=get_provider_gateway_registry(),
-        work_lock=PostgresProviderWorkLock(engine),
     )
 
 
 def get_process_releasing_reservation_service() -> ProcessReleasingReservationService:
     return ProcessReleasingReservationService(
         uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
+    )
+
+
+def get_process_claimed_provider_release_service() -> ProcessClaimedProviderReleaseService:
+    return ProcessClaimedProviderReleaseService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
         provider_gateways=get_provider_gateway_registry(),
-        work_lock=PostgresProviderWorkLock(engine),
     )
 
 
@@ -59,5 +65,4 @@ def get_reconcile_provider_work_service() -> ReconcileProviderWorkService:
     return ReconcileProviderWorkService(
         uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
         provider_gateways=get_provider_gateway_registry(),
-        work_lock=PostgresProviderWorkLock(engine),
     )

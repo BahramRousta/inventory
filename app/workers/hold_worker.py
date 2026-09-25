@@ -1,8 +1,8 @@
 import argparse
 import asyncio
 
-from app.application.services.select_pending_provider_hold import (
-    SelectPendingProviderHoldService,
+from app.application.services.claim_pending_provider_holds import (
+    ClaimPendingProviderHoldsService,
 )
 from app.bootstrap.config import get_settings
 from app.bootstrap.dependencies import get_process_pending_provider_hold_service
@@ -11,12 +11,23 @@ from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 
 
 async def run_once() -> bool:
-    work = await SelectPendingProviderHoldService(
-        uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal)
+    settings = get_settings()
+    claimed = await ClaimPendingProviderHoldsService(
+        uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
+        batch_size=settings.provider_worker_batch_size,
+        lease_seconds=settings.provider_worker_lease_seconds,
     ).execute()
-    if work is None:
+    if not claimed:
         return False
-    return await get_process_pending_provider_hold_service().execute(work)
+    processor = get_process_pending_provider_hold_service()
+    semaphore = asyncio.Semaphore(settings.provider_worker_concurrency)
+
+    async def process_one(work) -> bool:
+        async with semaphore:
+            return await processor.execute(work)
+
+    results = await asyncio.gather(*(process_one(work) for work in claimed))
+    return any(results)
 
 
 async def run_forever() -> None:

@@ -26,6 +26,7 @@ class ReservationStatus(StrEnum):
 
 class ReservationLineStatus(StrEnum):
     HOLD_PENDING = "HOLD_PENDING"
+    HOLD_IN_PROGRESS = "HOLD_IN_PROGRESS"
     HOLD_UNKNOWN = "HOLD_UNKNOWN"
     HELD = "HELD"
 
@@ -34,6 +35,7 @@ class ReservationLineStatus(StrEnum):
     CONFIRMED = "CONFIRMED"
 
     RELEASE_PENDING = "RELEASE_PENDING"
+    RELEASE_IN_PROGRESS = "RELEASE_IN_PROGRESS"
     RELEASE_UNKNOWN = "RELEASE_UNKNOWN"
     RELEASED = "RELEASED"
 
