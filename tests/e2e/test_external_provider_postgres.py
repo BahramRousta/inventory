@@ -26,6 +26,7 @@ from app.infrastructure.db.models import (
     InternalStockModel,
     OrderLineModel,
     OrderModel,
+    PaymentEventModel,
     ReservationLineModel,
     ReservationModel,
 )
@@ -581,6 +582,7 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
         order_count = await session.scalar(
             select(func.count()).select_from(OrderModel)
         )
+        payment_event = await session.get(PaymentEventModel, event_id)
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert reservation.release_reason == "PAYMENT_FAILED"
@@ -588,6 +590,8 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
     assert line.status == ReservationLineStatus.FAILED
     assert line.external_hold_ref is None
     assert order_count == 0
+    assert payment_event is not None
+    assert payment_event.outcome.value == "FAILURE"
 
     hold_key = f"{reservation_id}:{source.source_id}:HOLD"
     async with httpx.AsyncClient(timeout=1.0) as client:
