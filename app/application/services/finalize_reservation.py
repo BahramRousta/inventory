@@ -1,6 +1,5 @@
 from uuid import UUID
 
-from app.application.dto.reservations import OrderLineRecord
 from app.application.errors import ReservationStateConflict
 from app.application.ports.provider_gateway import ProviderGatewayRegistry
 from app.application.ports.repositories import UnitOfWork
@@ -21,7 +20,6 @@ async def finalize_confirming_reservation(
     sources = await uow.stock_sources.get_many(
         tuple(line.stock_source_id for line in lines)
     )
-    order_lines: list[OrderLineRecord] = []
 
     for line in lines:
         if line.status != ReservationLineStatus.HELD:
@@ -42,7 +40,6 @@ async def finalize_confirming_reservation(
                 raise ReservationStateConflict(
                     f"Internal hold for {line.stock_source_id} cannot be consumed."
                 )
-            provider_ref = None
         else:
             gateway = provider_gateways.get(source.provider_id)
             if gateway is None:
@@ -64,23 +61,13 @@ async def finalize_confirming_reservation(
         await uow.reservations.mark_line_confirmed(
             reservation_id, line.stock_source_id
         )
-        order_lines.append(
-            OrderLineRecord(
-                product_id=line.product_id,
-                stock_source_id=line.stock_source_id,
-                provider_id=source.provider_id,
-                quantity=line.quantity,
-                provider_allocation_ref=provider_ref,
-            )
-        )
 
     if not await uow.reservations.confirm_if_all_lines_confirmed(reservation_id):
         raise ReservationStateConflict(
             f"Reservation {reservation_id} could not be finalized."
         )
 
-    return await uow.orders.create_with_lines(
+    return await uow.orders.create(
         reservation_id=reservation_id,
         user_id=user_id,
-        lines=tuple(order_lines),
     )
