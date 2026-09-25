@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
-    ProviderHoldLookupOutcome,
-    ProviderHoldOutcome,
+    ProviderReservationLookupOutcome,
+    ProviderReserveOutcome,
     ProviderReleaseOutcome,
 )
 from app.application.services.claim_pending_provider_holds import (
@@ -24,12 +24,15 @@ from app.application.services.reconcile_provider_work import ReconcileProviderWo
 from app.domain.enums import ReservationLineStatus, ReservationStatus
 from app.infrastructure.db.models import OrderModel, ReservationLineModel, ReservationModel
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
-from app.infrastructure.providers.mock import MockReservationProviderGateway
+from app.infrastructure.providers.mock import (
+    MockAvailabilityProvider,
+    MockReservationProvider,
+)
 from tests.e2e.support import (
     api_client,
     create_body,
     create_headers,
-    reservation_registry,
+    provider_registry,
     seed_external_source,
     uow_factory,
 )
@@ -38,7 +41,7 @@ from tests.e2e.support import (
 pytestmark = pytest.mark.postgres
 
 
-async def _claim_and_process_hold(factory, registry):
+async def _claim_and_process_reservation(factory, registry):
     claimed = await ClaimPendingProviderHoldsService(
         uow_factory=uow_factory(factory),
         batch_size=10,
@@ -48,25 +51,25 @@ async def _claim_and_process_hold(factory, registry):
 
     processed = await ProcessPendingProviderHoldService(
         uow_factory=uow_factory(factory),
-        provider_gateways=registry,
+        providers=registry,
     ).execute(claimed[0])
     assert processed is True
     return claimed[0]
 
 
-async def test_mock_reservation_provider_hold_success_activates_reservation(
+async def test_mock_reservation_provider_reserve_success_activates_reservation(
     postgres_session_factory,
 ):
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-SUCCESS",
     )
-    gateway = MockReservationProviderGateway()
-    registry = reservation_registry(source.provider_id, gateway)
+    gateway = MockReservationProvider()
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -75,7 +78,7 @@ async def test_mock_reservation_provider_hold_success_activates_reservation(
         )
 
     assert created.status_code == 202
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, work.reservation_id)
@@ -85,13 +88,13 @@ async def test_mock_reservation_provider_hold_success_activates_reservation(
             )
         )
 
-    assert gateway.hold_calls == 1
+    assert gateway.reserve_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
     assert line is not None
     assert line.status == ReservationLineStatus.HELD
     assert line.external_hold_ref == (
-        f"mock-hold:{work.reservation_id}:{source.source_id}:HOLD"
+        f"mock-reservation:{work.reservation_id}:{source.source_id}:RESERVE"
     )
 
 
@@ -102,15 +105,15 @@ async def test_mock_provider_decline_compensates_to_cancelled(
         postgres_session_factory,
         sku="EXT-MOCK-DECLINE",
     )
-    gateway = MockReservationProviderGateway(
-        hold_outcome=ProviderHoldOutcome.DECLINED,
-        lookup_outcome=ProviderHoldLookupOutcome.NOT_HELD,
+    gateway = MockReservationProvider(
+        reserve_outcome=ProviderReserveOutcome.DECLINED,
+        lookup_outcome=ProviderReservationLookupOutcome.NOT_RESERVED,
     )
-    registry = reservation_registry(source.provider_id, gateway)
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -119,7 +122,7 @@ async def test_mock_provider_decline_compensates_to_cancelled(
         )
 
     assert created.status_code == 202
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, work.reservation_id)
@@ -146,22 +149,22 @@ async def test_mock_provider_decline_compensates_to_cancelled(
     assert reservation.status == ReservationStatus.CANCELLED
 
 
-async def test_unknown_hold_is_reconciled_to_active(
+async def test_unknown_reservation_is_reconciled_to_active(
     postgres_session_factory,
 ):
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-UNKNOWN",
     )
-    gateway = MockReservationProviderGateway(
-        hold_outcome=ProviderHoldOutcome.UNKNOWN,
-        lookup_outcome=ProviderHoldLookupOutcome.UNKNOWN,
+    gateway = MockReservationProvider(
+        reserve_outcome=ProviderReserveOutcome.UNKNOWN,
+        lookup_outcome=ProviderReservationLookupOutcome.UNKNOWN,
     )
-    registry = reservation_registry(source.provider_id, gateway)
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -170,7 +173,7 @@ async def test_unknown_hold_is_reconciled_to_active(
         )
 
     assert created.status_code == 202
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with postgres_session_factory() as session:
         line = await session.scalar(
@@ -181,7 +184,7 @@ async def test_unknown_hold_is_reconciled_to_active(
     assert line is not None
     assert line.status == ReservationLineStatus.HOLD_UNKNOWN
 
-    gateway.lookup_outcome = ProviderHoldLookupOutcome.HELD
+    gateway.lookup_outcome = ProviderReservationLookupOutcome.RESERVED
 
     async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
         unknown = await uow.reservations.claim_unknown_external_holds(
@@ -193,7 +196,7 @@ async def test_unknown_hold_is_reconciled_to_active(
 
     reconciled = await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
-        provider_gateways=registry,
+        providers=registry,
     ).reconcile_hold(unknown[0])
     assert reconciled is True
 
@@ -220,12 +223,12 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
         postgres_session_factory,
         sku="EXT-MOCK-RELEASE",
     )
-    gateway = MockReservationProviderGateway()
-    registry = reservation_registry(source.provider_id, gateway)
+    gateway = MockReservationProvider()
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -233,11 +236,11 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
             json=create_body(source),
         )
 
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         cancelled = await client.post(
             f"/reservations/{work.reservation_id}/cancel",
@@ -260,7 +263,7 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 
     persisted = await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
-        provider_gateways=registry,
+        providers=registry,
     ).execute(releases[0])
     assert persisted is True
 
@@ -286,15 +289,15 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
         postgres_session_factory,
         sku="EXT-MOCK-RELEASE-UNKNOWN",
     )
-    gateway = MockReservationProviderGateway(
+    gateway = MockReservationProvider(
         release_outcome=ProviderReleaseOutcome.UNKNOWN,
-        lookup_outcome=ProviderHoldLookupOutcome.HELD,
+        lookup_outcome=ProviderReservationLookupOutcome.RESERVED,
     )
-    registry = reservation_registry(source.provider_id, gateway)
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         await client.post(
             "/reservations",
@@ -302,11 +305,11 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
             json=create_body(source),
         )
 
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         await client.post(
             f"/reservations/{work.reservation_id}/cancel",
@@ -326,7 +329,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
-        provider_gateways=registry,
+        providers=registry,
     ).execute(releases[0])
 
     async with postgres_session_factory() as session:
@@ -341,7 +344,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
     assert line is not None
     assert line.status == ReservationLineStatus.RELEASE_UNKNOWN
 
-    gateway.lookup_outcome = ProviderHoldLookupOutcome.NOT_HELD
+    gateway.lookup_outcome = ProviderReservationLookupOutcome.NOT_RESERVED
 
     async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
         unknown = await uow.reservations.claim_unknown_external_releases(
@@ -353,7 +356,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
-        provider_gateways=registry,
+        providers=registry,
     ).reconcile_release(unknown[0])
 
     async with postgres_session_factory() as session:
@@ -377,12 +380,12 @@ async def test_payment_success_on_external_hold_creates_single_order(
         postgres_session_factory,
         sku="EXT-MOCK-PAYMENT",
     )
-    gateway = MockReservationProviderGateway()
-    registry = reservation_registry(source.provider_id, gateway)
+    gateway = MockReservationProvider()
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         await client.post(
             "/reservations",
@@ -390,11 +393,11 @@ async def test_payment_success_on_external_hold_creates_single_order(
             json=create_body(source),
         )
 
-    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    work = await _claim_and_process_reservation(postgres_session_factory, registry)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         paid = await client.post(
             f"/reservations/{work.reservation_id}/payment-outcome",
@@ -430,12 +433,12 @@ async def test_payment_failure_before_provider_call_never_invokes_mock_hold(
         postgres_session_factory,
         sku="EXT-MOCK-NO-CALL",
     )
-    gateway = MockReservationProviderGateway()
-    registry = reservation_registry(source.provider_id, gateway)
+    gateway = MockReservationProvider()
+    registry = provider_registry(source.provider_id, gateway)
 
     async with api_client(
         postgres_session_factory,
-        provider_gateways=registry,
+        providers=registry,
     ) as client:
         created = await client.post(
             "/reservations",
@@ -463,8 +466,54 @@ async def test_payment_failure_before_provider_call_never_invokes_mock_hold(
             )
         )
 
-    assert gateway.hold_calls == 0
+    assert gateway.reserve_calls == 0
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert line is not None
     assert line.status == ReservationLineStatus.FAILED
+
+
+async def test_query_provider_reserve_uses_availability_and_activates_reservation(
+    postgres_session_factory,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-QUERY-PROVIDER",
+    )
+    provider = MockAvailabilityProvider(available_quantity=5)
+    registry = provider_registry(source.provider_id, provider)
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="query-provider"),
+            json=create_body(source, quantity=2),
+        )
+
+    assert created.status_code == 202
+
+    work = await _claim_and_process_reservation(
+        postgres_session_factory,
+        registry,
+    )
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(
+            ReservationModel,
+            work.reservation_id,
+        )
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id
+                == work.reservation_id
+            )
+        )
+
+    assert provider.reserve_calls == 1
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.ACTIVE
+    assert line is not None
+    assert line.status == ReservationLineStatus.HELD
+    assert line.external_hold_ref == (
+        f"query:{work.reservation_id}:{source.source_id}:RESERVE"
+    )

@@ -593,16 +593,6 @@ class SqlAlchemyReservationRepository:
         await self._session.flush()
         return tuple(claimed)
 
-    async def get_external_hold_ref(
-        self, reservation_id: UUID, stock_source_id: UUID
-    ) -> str | None:
-        return await self._session.scalar(
-            select(ReservationLineModel.external_hold_ref).where(
-                ReservationLineModel.reservation_id == reservation_id,
-                ReservationLineModel.stock_source_id == stock_source_id,
-            )
-        )
-
     async def get_lines(self, reservation_id: UUID) -> tuple[ReservationLineResult, ...]:
         rows = (
             await self._session.execute(

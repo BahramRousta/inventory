@@ -1,93 +1,136 @@
 from uuid import UUID
 
 from app.application.ports.provider_gateway import (
-    ProviderAvailabilityResult,
-    ProviderHoldLookupOutcome,
-    ProviderHoldLookupResult,
-    ProviderHoldOutcome,
-    ProviderHoldResult,
     ProviderReleaseOutcome,
     ProviderReleaseResult,
+    ProviderReservationLookupOutcome,
+    ProviderReservationLookupResult,
+    ProviderReserveOutcome,
+    ProviderReserveResult,
 )
 
 
-class MockAvailabilityProviderGateway:
-    """Assignment-only query provider with a deterministic response."""
+class MockAvailabilityProvider:
+    """Query-style provider.
+
+    reserve() is implemented by an availability check. For this interview
+    assignment, a positive query result is treated as an accepted external
+    reservation decision.
+    """
 
     def __init__(self, available_quantity: int = 100) -> None:
         self.available_quantity = available_quantity
-
-    async def check_availability(
-        self,
-        *,
-        stock_source_id: UUID,
-    ) -> ProviderAvailabilityResult:
-        del stock_source_id
-        return ProviderAvailabilityResult(
-            available_quantity=self.available_quantity
-        )
-
-
-class MockReservationProviderGateway:
-    """Assignment-only reservation provider.
-
-    It deliberately avoids real HTTP/provider integration. Outcomes are
-    configurable so services and workers can demonstrate happy, declined, and
-    ambiguous provider behavior.
-    """
-
-    hold_is_final_allocation = True
-
-    def __init__(
-        self,
-        *,
-        hold_outcome: ProviderHoldOutcome = ProviderHoldOutcome.HELD,
-        release_outcome: ProviderReleaseOutcome = ProviderReleaseOutcome.RELEASED,
-        lookup_outcome: ProviderHoldLookupOutcome = ProviderHoldLookupOutcome.HELD,
-    ) -> None:
-        self.hold_outcome = hold_outcome
-        self.release_outcome = release_outcome
-        self.lookup_outcome = lookup_outcome
-        self._hold_refs: dict[str, str] = {}
-        self.hold_calls = 0
+        self.reserve_calls = 0
         self.release_calls = 0
         self.lookup_calls = 0
+        self._accepted: set[str] = set()
 
-    async def hold(
+    async def reserve(
         self,
         *,
         stock_source_id: UUID,
         quantity: int,
-        hold_key: str,
+        reservation_key: str,
         expires_at,
-    ) -> ProviderHoldResult:
-        del stock_source_id, quantity, expires_at
-        self.hold_calls += 1
-        if self.hold_outcome == ProviderHoldOutcome.DECLINED:
-            return ProviderHoldResult(
-                outcome=ProviderHoldOutcome.DECLINED,
-                error_code="MOCK_HOLD_DECLINED",
-            )
-        if self.hold_outcome == ProviderHoldOutcome.UNKNOWN:
-            return ProviderHoldResult(
-                outcome=ProviderHoldOutcome.UNKNOWN,
-                error_code="MOCK_HOLD_UNKNOWN",
+    ) -> ProviderReserveResult:
+        del stock_source_id, expires_at
+        self.reserve_calls += 1
+        if self.available_quantity < quantity:
+            return ProviderReserveResult(
+                outcome=ProviderReserveOutcome.DECLINED,
+                error_code="MOCK_NOT_AVAILABLE",
             )
 
-        hold_ref = self._hold_refs.setdefault(hold_key, f"mock-hold:{hold_key}")
-        return ProviderHoldResult(
-            outcome=ProviderHoldOutcome.HELD,
-            external_hold_ref=hold_ref,
+        self._accepted.add(reservation_key)
+        return ProviderReserveResult(
+            outcome=ProviderReserveOutcome.RESERVED,
+            external_ref=f"query:{reservation_key}",
         )
 
     async def release(
         self,
         *,
         stock_source_id: UUID,
-        external_hold_ref: str,
+        external_ref: str,
         release_key: str,
     ) -> ProviderReleaseResult:
-        del stock_source_id, external_hold_ref, release_key
+        del stock_source_id, external_ref, release_key
+        self.release_calls += 1
+        return ProviderReleaseResult(outcome=ProviderReleaseOutcome.RELEASED)
+
+    async def get_reservation(
+        self,
+        *,
+        reservation_key: str,
+    ) -> ProviderReservationLookupResult:
+        self.lookup_calls += 1
+        if reservation_key in self._accepted:
+            return ProviderReservationLookupResult(
+                outcome=ProviderReservationLookupOutcome.RESERVED,
+                external_ref=f"query:{reservation_key}",
+            )
+        return ProviderReservationLookupResult(
+            outcome=ProviderReservationLookupOutcome.NOT_RESERVED
+        )
+
+
+class MockReservationProvider:
+    """Hold-style provider with configurable deterministic outcomes."""
+
+    def __init__(
+        self,
+        *,
+        reserve_outcome: ProviderReserveOutcome = ProviderReserveOutcome.RESERVED,
+        release_outcome: ProviderReleaseOutcome = ProviderReleaseOutcome.RELEASED,
+        lookup_outcome: ProviderReservationLookupOutcome = ProviderReservationLookupOutcome.RESERVED,
+    ) -> None:
+        self.reserve_outcome = reserve_outcome
+        self.release_outcome = release_outcome
+        self.lookup_outcome = lookup_outcome
+        self._refs: dict[str, str] = {}
+        self.reserve_calls = 0
+        self.release_calls = 0
+        self.lookup_calls = 0
+
+    async def reserve(
+        self,
+        *,
+        stock_source_id: UUID,
+        quantity: int,
+        reservation_key: str,
+        expires_at,
+    ) -> ProviderReserveResult:
+        del stock_source_id, quantity, expires_at
+        self.reserve_calls += 1
+
+        if self.reserve_outcome == ProviderReserveOutcome.DECLINED:
+            return ProviderReserveResult(
+                outcome=ProviderReserveOutcome.DECLINED,
+                error_code="MOCK_RESERVATION_DECLINED",
+            )
+        if self.reserve_outcome == ProviderReserveOutcome.UNKNOWN:
+            return ProviderReserveResult(
+                outcome=ProviderReserveOutcome.UNKNOWN,
+                error_code="MOCK_RESERVATION_UNKNOWN",
+            )
+
+        external_ref = self._refs.setdefault(
+            reservation_key,
+            f"mock-reservation:{reservation_key}",
+        )
+        return ProviderReserveResult(
+            outcome=ProviderReserveOutcome.RESERVED,
+            external_ref=external_ref,
+        )
+
+    async def release(
+        self,
+        *,
+        stock_source_id: UUID,
+        external_ref: str,
+        release_key: str,
+    ) -> ProviderReleaseResult:
+        del stock_source_id, external_ref, release_key
         self.release_calls += 1
         if self.release_outcome == ProviderReleaseOutcome.UNKNOWN:
             return ProviderReleaseResult(
@@ -96,20 +139,27 @@ class MockReservationProviderGateway:
             )
         return ProviderReleaseResult(outcome=ProviderReleaseOutcome.RELEASED)
 
-    async def get_hold(self, *, hold_key: str) -> ProviderHoldLookupResult:
+    async def get_reservation(
+        self,
+        *,
+        reservation_key: str,
+    ) -> ProviderReservationLookupResult:
         self.lookup_calls += 1
-        if self.lookup_outcome == ProviderHoldLookupOutcome.UNKNOWN:
-            return ProviderHoldLookupResult(
-                outcome=ProviderHoldLookupOutcome.UNKNOWN,
+        if self.lookup_outcome == ProviderReservationLookupOutcome.UNKNOWN:
+            return ProviderReservationLookupResult(
+                outcome=ProviderReservationLookupOutcome.UNKNOWN,
                 error_code="MOCK_LOOKUP_UNKNOWN",
             )
-        if self.lookup_outcome == ProviderHoldLookupOutcome.NOT_HELD:
-            return ProviderHoldLookupResult(
-                outcome=ProviderHoldLookupOutcome.NOT_HELD
+        if self.lookup_outcome == ProviderReservationLookupOutcome.NOT_RESERVED:
+            return ProviderReservationLookupResult(
+                outcome=ProviderReservationLookupOutcome.NOT_RESERVED
             )
 
-        hold_ref = self._hold_refs.setdefault(hold_key, f"mock-hold:{hold_key}")
-        return ProviderHoldLookupResult(
-            outcome=ProviderHoldLookupOutcome.HELD,
-            external_hold_ref=hold_ref,
+        external_ref = self._refs.setdefault(
+            reservation_key,
+            f"mock-reservation:{reservation_key}",
+        )
+        return ProviderReservationLookupResult(
+            outcome=ProviderReservationLookupOutcome.RESERVED,
+            external_ref=external_ref,
         )

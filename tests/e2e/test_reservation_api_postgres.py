@@ -4,7 +4,6 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from app.infrastructure.providers.mock import MockAvailabilityProviderGateway
 from app.application.services.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
@@ -28,7 +27,6 @@ from tests.e2e.support import (
     create_headers,
     reservation_count,
     reservation_line_count,
-    availability_only_registry,
     seed_external_source,
     seed_internal_source,
     uow_factory,
@@ -310,59 +308,36 @@ async def test_create_requires_verified_user_and_idempotency_headers(
     assert stock.held == 0
 
 
-async def test_query_only_provider_is_rejected_for_reservation_workflow(
+async def test_enabled_external_provider_is_accepted_before_provider_processing(
     postgres_session_factory,
 ):
     source = await seed_external_source(
         postgres_session_factory,
-        sku="QUERY-ONLY",
-    )
-    registry = availability_only_registry(
-        source.provider_id,
-        MockAvailabilityProviderGateway(),
-    )
-
-    async with api_client(
-        postgres_session_factory,
-        provider_gateways=registry,
-    ) as client:
-        response = await client.post(
-            "/reservations",
-            headers=create_headers(idempotency_key="unsupported-external"),
-            json=create_body(source),
-        )
-
-    assert response.status_code == 422
-    assert response.json()["code"] == "SOURCE_NOT_RESERVABLE"
-    assert await reservation_count(postgres_session_factory) == 0
-
-    async with postgres_session_factory() as session:
-        lines = await session.scalar(select(func.count()).select_from(ReservationLineModel))
-    assert lines == 0
-
-
-async def test_external_provider_without_gateway_is_rejected_before_creation(
-    postgres_session_factory,
-):
-    source = await seed_external_source(
-        postgres_session_factory,
-        sku="NO-GATEWAY",
+        sku="EXTERNAL-PENDING",
     )
 
     async with api_client(postgres_session_factory) as client:
         response = await client.post(
             "/reservations",
-            headers=create_headers(idempotency_key="no-gateway"),
+            headers=create_headers(idempotency_key="external-pending"),
             json=create_body(source),
         )
 
-    assert response.status_code == 422
-    assert response.json()["code"] == "SOURCE_NOT_RESERVABLE"
-    assert await reservation_count(postgres_session_factory) == 0
+    assert response.status_code == 202
+    reservation_id = UUID(response.json()["reservation_id"])
 
     async with postgres_session_factory() as session:
-        count = await session.scalar(select(func.count()).select_from(ReservationLineModel))
-    assert count == 0
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RESERVING
+    assert line is not None
+    assert line.status == ReservationLineStatus.HOLD_PENDING
 
 
 async def test_get_reservation_returns_persisted_snapshot_for_owner(

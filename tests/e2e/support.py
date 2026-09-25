@@ -8,8 +8,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
-    ProviderGatewayRegistry,
     ProviderRegistry,
+    ProviderRegistryProtocol,
 )
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
@@ -122,17 +122,16 @@ def uow_factory(factory):
 def install_api_overrides(
     factory,
     *,
-    provider_gateways: ProviderGatewayRegistry | None = None,
+    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ) -> None:
-    registry = provider_gateways or ProviderRegistry()
+    registry = providers or ProviderRegistry()
     make_uow = uow_factory(factory)
 
     app.dependency_overrides[get_create_reservation_service] = lambda: CreateReservationService(
         uow_factory=make_uow,
         clock=SystemClock(),
         ttl_seconds=ttl_seconds,
-        provider_gateways=registry,
     )
     app.dependency_overrides[get_reservation_service] = lambda: GetReservationService(
         uow_factory=make_uow
@@ -142,11 +141,9 @@ def install_api_overrides(
     )
     app.dependency_overrides[get_confirm_reservation_service] = lambda: ConfirmReservationService(
         uow_factory=make_uow,
-        provider_gateways=registry,
     )
     app.dependency_overrides[get_payment_outcome_service] = lambda: ProcessPaymentOutcomeService(
         uow_factory=make_uow,
-        provider_gateways=registry,
     )
 
 
@@ -154,12 +151,12 @@ def install_api_overrides(
 async def api_client(
     factory,
     *,
-    provider_gateways: ProviderGatewayRegistry | None = None,
+    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ):
     install_api_overrides(
         factory,
-        provider_gateways=provider_gateways,
+        providers=providers,
         ttl_seconds=ttl_seconds,
     )
     try:
@@ -207,9 +204,5 @@ async def reservation_line_count(factory) -> int:
         )
 
 
-def reservation_registry(provider_id: UUID, gateway) -> ProviderRegistry:
-    return ProviderRegistry(reservation_providers={provider_id: gateway})
-
-
-def availability_only_registry(provider_id: UUID, gateway) -> ProviderRegistry:
-    return ProviderRegistry(availability_providers={provider_id: gateway})
+def provider_registry(provider_id: UUID, provider) -> ProviderRegistry:
+    return ProviderRegistry({provider_id: provider})
