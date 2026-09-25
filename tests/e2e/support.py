@@ -9,7 +9,6 @@ from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
     ProviderRegistry,
-    ProviderRegistryProtocol,
 )
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
@@ -122,10 +121,8 @@ def uow_factory(factory):
 def install_api_overrides(
     factory,
     *,
-    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ) -> None:
-    registry = providers or ProviderRegistry()
     make_uow = uow_factory(factory)
 
     app.dependency_overrides[get_create_reservation_service] = lambda: CreateReservationService(
@@ -151,12 +148,10 @@ def install_api_overrides(
 async def api_client(
     factory,
     *,
-    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ):
     install_api_overrides(
         factory,
-        providers=providers,
         ttl_seconds=ttl_seconds,
     )
     try:
