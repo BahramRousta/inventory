@@ -1294,3 +1294,43 @@ async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
     assert line.quantity == 3
     assert stock is not None
     assert stock.held == 3
+
+
+async def test_existing_payment_event_replay_still_requires_reservation_owner(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="PAY-REPLAY-OWNER", on_hand=2
+    )
+    event_id = uuid4()
+
+    async with api_client(postgres_session_factory) as client:
+        created = await _create_internal(client, source, key="pay-replay-owner-create")
+        reservation_id = UUID(created.json()["reservation_id"])
+        success = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(event_id), "outcome": "SUCCESS"},
+        )
+        wrong_owner_replay = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="other-user"),
+            json={"event_id": str(event_id), "outcome": "SUCCESS"},
+        )
+
+    assert success.status_code == 200
+    assert wrong_owner_replay.status_code == 404
+    assert wrong_owner_replay.json()["code"] == "RESERVATION_NOT_FOUND"
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        event_count = await session.scalar(
+            select(func.count()).select_from(PaymentEventModel)
+        )
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CONFIRMED
+    assert event_count == 1
+    assert order_count == 1
