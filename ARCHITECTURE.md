@@ -1,115 +1,607 @@
-# Architecture
+# ARCHITECTURE
 
-## Scope
+## 1. Scope
 
-This service coordinates inventory reservations during checkout. It owns local
-reservation state, internal inventory holds, the local order record, and durable
-workflow state for external inventory providers.
+This service owns inventory reservation during checkout.
 
-Authentication and payment processing are outside the service. A trusted caller
-supplies the verified user identity through `X-User-Id`. After payment succeeds
-outside this service, the caller invokes the reservation confirm endpoint; on
-failure or abandonment it invokes cancel or lets the reservation expire.
+It is responsible for:
 
-## Architectural style
+- creating a reservation for one or more source-specific items;
+- preventing oversell for inventory controlled by this service;
+- coordinating reservation attempts against external inventory providers;
+- exposing reservation state;
+- confirming a valid reservation and creating one final order;
+- cancelling or expiring a reservation and releasing held inventory;
+- recovering ambiguous external-provider outcomes.
 
-The code uses ports and adapters around application services:
+Authentication, payment processing, cart management, pricing, shipping, seller
+selection, and provider-onboarding UI are outside this service.
 
-- FastAPI routes translate HTTP requests into application commands.
-- Application services own reservation workflows and state transitions.
-- Repository and provider protocols are application-owned ports.
-- SQLAlchemy/PostgreSQL and provider gateways are infrastructure adapters.
-- A unit of work gives one transaction boundary for local state changes.
-- Independent workers claim external work from PostgreSQL using row locks and
-  leases.
+The caller supplies an already-verified `X-User-Id`. Payment is handled
+outside this service. After successful payment the caller invokes
+`POST /reservations/{id}/confirm`; when checkout fails or is abandoned it
+invokes cancel, or the reservation expires by TTL.
 
-Provider work is invoked outside database transactions; the interview implementation uses deterministic mock gateways at that boundary.
+This is an explicit boundary decision for this implementation: the assignment
+requires confirmation after successful payment, but this inventory service does
+not model payment itself.
 
-## Reservation creation
+## 2. Public API
 
-Internal-only reservations are synchronous. One transaction validates the
-source, creates the reservation and lines, performs guarded local holds, and
-moves the reservation to `ACTIVE`.
+The implemented reservation API is intentionally small:
 
-Mixed or external reservations create durable `HOLD_PENDING` lines and return
-`202 Accepted`. HOLD calls are performed later by the hold worker.
+```text
+POST /reservations
+GET  /reservations/{reservation_id}
+POST /reservations/{reservation_id}/confirm
+POST /reservations/{reservation_id}/cancel
+```
 
-Duplicate request items with the same product/source pair are canonicalized
-before stock mutation. The canonical body is hashed and stored as
-`request_fingerprint`. A replay with the same user and `Idempotency-Key`
-returns the existing snapshot; a changed body raises `IDEMPOTENCY_CONFLICT`.
+`POST /reservations` requires:
 
-## External-provider contract
+- `X-User-Id`
+- `Idempotency-Key`
+- one or more items containing `product_id`, `stock_source_id`, and quantity.
 
-The assignment demo chooses this explicit provider contract:
+An internal-only reservation can become `ACTIVE` synchronously. A reservation
+with external lines is created as `RESERVING` and external work is completed
+asynchronously.
 
-**A successful HOLD is the final external allocation.**
+## 3. Architectural style
 
-The application owns one provider port: `InventoryProvider`. The worker loads
-a provider by ID and calls `reserve(...)`; the concrete provider decides how
-that operation is implemented. A query-style provider may check availability,
-while a reservation-style provider may perform a HOLD. The application service
-does not branch on those provider details.
+The implementation uses ports and adapters.
 
-The same provider abstraction also exposes release/status operations needed by
-compensation and reconciliation. The interview implementation uses simple mock
-providers rather than real HTTP integrations.
+```text
+FastAPI
+  |
+  v
+Application services
+  |
+  +---- Repository ports --------> SQLAlchemy / PostgreSQL
+  |
+  +---- InventoryProvider port --> provider implementations
+```
 
-## Confirmation
+The application layer is organized by business flow:
 
-Checkout/payment handling is outside this service. The reservation API exposes
-`POST /reservations/{id}/confirm` as the success transition.
+```text
+app/application/services/
+├── create/
+├── inquiry/
+├── confirm/
+├── cancel/
+├── expiry/
+└── reconciliation/
+```
 
-Confirmation conditionally transitions `ACTIVE -> CONFIRMING` before expiry,
-consumes internal held stock, marks all reservation lines `CONFIRMED`, and
-creates exactly one local order.
+The application layer depends on repository/provider protocols, not on
+SQLAlchemy or provider-specific implementations.
 
-Failure/abandonment is represented through the existing cancel and TTL-expiry
-paths; there is no payment-specific API or payment domain model.
+PostgreSQL is both:
 
-## Compensation and terminal truth
+1. the transactional source of truth for local reservation state; and
+2. the durable work queue for external provider work.
 
-A reservation enters `RELEASING` for creation failure, user cancellation, or TTL expiry.
+This avoids introducing a broker for the assignment while still allowing
+multiple worker processes to coordinate safely.
 
-Internal holds are released transactionally. Known external holds become
-`RELEASE_PENDING` and are released asynchronously. Ambiguous external
-outcomes remain `HOLD_UNKNOWN` or `RELEASE_UNKNOWN` until reconciliation
-proves the provider state.
+## 4. Domain model
 
-The terminal status preserves the reason:
+### Product
 
-- `release_reason=EXPIRED` -> `EXPIRED`
-- other resolved release reasons -> `CANCELLED`
+`Product` represents the catalog item.
 
-Finalization never overwrites `release_reason`.
+### InventoryProvider
 
-## Worker model
+`InventoryProvider` identifies the system or owner that controls a stock
+source. The database stores only identity/business state:
 
-PostgreSQL is the durable work queue. Workers use
-`FOR UPDATE SKIP LOCKED` plus a claim token and lease expiry. This allows
-multiple worker processes to claim different rows without an external broker.
-Expired claims are recovered into an unknown state and reconciled before any
-terminal claim is made.
+- id;
+- name;
+- kind: `INTERNAL` or `EXTERNAL`;
+- enabled flag.
 
-The Compose deployment runs independent hold, release, reconciliation and
-expiry worker processes.
+Provider implementation details are kept outside the database.
 
-## Deliberate simplicity
+### StockSource
 
-For this interview assignment:
+A product can have inventory from different sources. `StockSource` connects a
+product to an inventory provider and optional provider SKU.
 
-- PostgreSQL is the only local source of truth; no Kafka, RabbitMQ, Celery or
-  Redis is introduced.
-- Only simple mock provider gateways are used in the runnable demo; real provider HTTP/auth details are deliberately out of scope.
-- Provider HOLD is the final external allocation, avoiding an undocumented
-  remote CONFIRM protocol.
-- The final order is linked one-to-one with its confirmed reservation; detailed
-  item/source state remains on the reservation lines for this assignment scope.
-- Authentication and payment processing remain outside the service boundary.
+The reservation request selects a concrete stock source. This service does not
+choose the seller/provider automatically.
 
-## What would change with more time
+### InternalStock
 
-The next production steps would be stronger operational metrics, per-provider
-rate limiting and circuit breaking, a real provider adapter/authentication integration,
-partitioned worker queues for very high provider volume, and broader
-PostgreSQL-backed end-to-end verification.
+For locally controlled inventory:
+
+```text
+available = on_hand - held
+```
+
+The database enforces:
+
+```text
+on_hand >= 0
+held >= 0
+held <= on_hand
+```
+
+### Reservation
+
+A reservation has:
+
+- owner `user_id`;
+- idempotency key;
+- lifecycle status;
+- `expires_at`;
+- optional release reason;
+- timestamps.
+
+Reservation statuses are:
+
+```text
+RESERVING
+ACTIVE
+CONFIRMING
+RELEASING
+CONFIRMED
+CANCELLED
+EXPIRED
+```
+
+### ReservationLine
+
+Each line identifies one stock source and quantity. Line states capture the
+provider/local workflow, including:
+
+```text
+HOLD_PENDING
+HOLD_IN_PROGRESS
+HOLD_UNKNOWN
+HELD
+
+RELEASE_PENDING
+RELEASE_IN_PROGRESS
+RELEASE_UNKNOWN
+RELEASED
+
+CONFIRMED
+FAILED
+```
+
+A reservation is not considered `ACTIVE` until all required lines are in
+`HELD`.
+
+### Order
+
+The assignment requires creation of a final order after successful
+confirmation. This implementation stores one order header per reservation:
+
+```text
+orders.reservation_id UNIQUE
+```
+
+Detailed purchased item/source information remains available from the
+reservation lines. A full OMS is deliberately outside scope.
+
+## 5. Internal inventory correctness
+
+Local stock reservation uses a single guarded SQL `UPDATE`:
+
+```text
+UPDATE internal_stock
+SET held = held + quantity
+WHERE stock_source_id = ?
+  AND on_hand - held >= quantity
+```
+
+The update succeeds for only one transaction when two concurrent requests
+compete for the last units.
+
+This is the main local inventory invariant:
+
+> a reservation may only increase `held` when enough unheld `on_hand`
+> inventory exists.
+
+On cancellation:
+
+```text
+held = held - quantity
+```
+
+On confirmation:
+
+```text
+held    = held - quantity
+on_hand = on_hand - quantity
+```
+
+Both operations are guarded so quantities cannot become invalid.
+
+## 6. Reservation creation
+
+### Internal source
+
+For an internal source the create transaction:
+
+1. validates source/product ownership and enabled state;
+2. creates the reservation in `RESERVING`;
+3. atomically holds internal inventory;
+4. creates the reservation line as `HELD`;
+5. moves the reservation to `ACTIVE` when no external work remains;
+6. commits.
+
+If the stock hold fails, the transaction is rolled back.
+
+### External source
+
+For an external source, create does not call a provider while holding the
+database transaction.
+
+Instead it stores:
+
+```text
+Reservation     -> RESERVING
+ReservationLine -> HOLD_PENDING
+```
+
+and returns a pending reservation.
+
+A worker later claims the line and performs provider work.
+
+This separation is deliberate: remote latency or failure must not keep a
+database transaction open.
+
+## 7. Provider abstraction
+
+The application sees one interface:
+
+```python
+class InventoryProvider(Protocol):
+    async def reserve(...): ...
+    async def release(...): ...
+    async def get_reservation(...): ...
+```
+
+The worker does not inspect provider type or capabilities. It resolves the
+provider by `provider_id` and calls:
+
+```python
+provider.reserve(...)
+```
+
+The concrete provider decides how that reservation attempt is implemented.
+
+For this interview implementation two simple provider styles are demonstrated:
+
+- a reservation-style provider can model a real upstream HOLD;
+- a query-style provider can model a stock-availability API.
+
+The common result is one of:
+
+```text
+RESERVED
+DECLINED
+UNKNOWN
+```
+
+### Important guarantee for query-only providers
+
+A stock query is not a real upstream lock.
+
+Therefore a query-style provider is treated as a **best-effort reservation
+mode** in this demo. If availability is sufficient, the line may become
+`HELD` locally, but the service cannot prevent another customer of that
+external provider from buying the same units.
+
+That limitation is intentional and documented rather than pretending a query
+API provides exclusivity.
+
+In a production checkout requiring guaranteed inventory, I would either reject
+query-only providers for the guaranteed path or require a stronger contractual
+allocation mechanism.
+
+## 8. Provider failure handling
+
+Provider calls happen outside database transactions.
+
+Before calling a provider, a worker durably claims work using:
+
+- line status;
+- a random claim token;
+- a lease deadline.
+
+The claim is created under PostgreSQL locking with `FOR UPDATE SKIP LOCKED`.
+
+This permits multiple workers to process different rows without processing the
+same claim concurrently.
+
+A provider result is mapped as follows:
+
+```text
+RESERVED -> HELD
+DECLINED -> FAILED
+UNKNOWN  -> HOLD_UNKNOWN
+```
+
+An exception during `reserve()` is treated as `UNKNOWN`, not as a
+definitive failure, because the remote side effect may have happened before the
+response was lost.
+
+## 9. Reconciliation
+
+Ambiguous remote outcomes remain durable.
+
+```text
+HOLD_UNKNOWN
+RELEASE_UNKNOWN
+```
+
+The reconciliation worker claims unknown work and calls:
+
+```python
+provider.get_reservation(reservation_key=...)
+```
+
+Possible lookup results:
+
+```text
+RESERVED
+NOT_RESERVED
+UNKNOWN
+```
+
+The line is only moved to a truthful terminal/intermediate state when the
+provider result is known.
+
+Expired worker leases are also recovered into an unknown state so a crashed
+worker does not silently lose remote work.
+
+## 10. Confirmation
+
+Only an `ACTIVE` reservation can be confirmed.
+
+Confirmation starts with an atomic compare-and-set:
+
+```text
+ACTIVE -> CONFIRMING
+```
+
+and the SQL condition also requires:
+
+```text
+expires_at > database_now
+```
+
+This prevents confirmation after the reservation TTL has already elapsed and
+protects against races with the expiry worker.
+
+During confirmation:
+
+1. every line must already be `HELD`;
+2. internal holds are consumed;
+3. lines become `CONFIRMED`;
+4. the reservation becomes `CONFIRMED`;
+5. one order is created.
+
+All local confirmation changes run in one database transaction.
+
+Repeated confirmation of an already confirmed reservation returns the existing
+order rather than creating another one.
+
+## 11. Cancellation and expiration
+
+Cancellation moves an eligible reservation to:
+
+```text
+RELEASING
+```
+
+The release worker then:
+
+- marks unprocessed pending external holds as failed;
+- releases internal held inventory transactionally;
+- moves known external holds to `RELEASE_PENDING`;
+- calls external provider `release()` outside the transaction;
+- reconciles ambiguous releases when required.
+
+When every line is resolved, the reservation becomes:
+
+```text
+CANCELLED
+```
+
+For TTL expiry, the same compensation path is used but the release reason is
+`EXPIRED`, so the final state becomes:
+
+```text
+EXPIRED
+```
+
+This preserves why the inventory was released.
+
+## 12. Transaction boundaries
+
+The main rule is:
+
+> database state changes are transactional; remote provider calls are not made
+> inside the transaction.
+
+Examples:
+
+### Create internal reservation
+
+One transaction:
+
+```text
+reservation row
++ reservation lines
++ internal hold
++ ACTIVE transition
+```
+
+### External reserve
+
+```text
+TX 1: claim work + commit
+remote provider call
+TX 2: persist result + reservation transition + commit
+```
+
+### Confirm
+
+One local transaction:
+
+```text
+ACTIVE -> CONFIRMING
+consume internal holds
+mark lines CONFIRMED
+reservation -> CONFIRMED
+create order
+```
+
+No distributed transaction is attempted across PostgreSQL and an external
+provider.
+
+## 13. Idempotency and concurrency
+
+### Create
+
+The database has a uniqueness constraint on:
+
+```text
+(user_id, idempotency_key)
+```
+
+A retry returns the existing reservation rather than creating a second one.
+
+### Confirm
+
+The reservation state transition and the unique
+`orders.reservation_id` constraint prevent duplicate final orders.
+
+### Workers
+
+Worker claim tokens and leases make stale or duplicate worker results fail the
+compare-and-set update instead of overwriting newer state.
+
+## 14. Indexes used by the workflow
+
+The schema currently includes:
+
+```text
+reservations(status, expires_at)
+reservation_lines(status, provider_lease_until)
+```
+
+These support:
+
+- expiration scans;
+- provider work claims;
+- stale-lease recovery.
+
+## 15. Why PostgreSQL is also the work queue
+
+For this assignment, keeping workflow state and work claims in PostgreSQL has
+several advantages:
+
+- one durable system;
+- transactional creation of work with reservation state;
+- no outbox needed;
+- easy recovery after worker crash;
+- `SKIP LOCKED` enables multiple workers.
+
+A broker would add another durable subsystem and failure boundary without being
+necessary for the demonstrated workload.
+
+## 16. Assumptions and deliberate simplifications
+
+The following are explicit implementation assumptions:
+
+1. The caller has already authenticated the user.
+2. Payment happens outside this service.
+3. A successful external reservation/HOLD does not require a second remote
+   confirmation call in this demo.
+4. Query-only providers are best-effort and do not provide a globally exclusive
+   reservation.
+5. The request selects a stock source; this service does not rank providers or
+   substitute another seller.
+6. Reservation TTL defaults to 900 seconds.
+7. Provider integrations are deterministic mocks for the assignment; real HTTP
+   authentication and transport code are intentionally not implemented.
+8. Provider secrets/credential storage is not implemented in this demo.
+   In production I would inject secret material from a secret manager or
+   deployment environment and keep only non-secret identity/configuration in
+   application configuration.
+9. PostgreSQL is the only durable infrastructure dependency.
+10. The order model is intentionally minimal.
+
+## 17. Failure scenarios demonstrated
+
+The assignment asks for at least two provider-call scenarios, including a
+non-happy path. The implementation supports deterministic provider behavior for:
+
+### Scenario A: successful reservation
+
+```text
+HOLD_PENDING
+-> HOLD_IN_PROGRESS
+-> provider.reserve()
+-> RESERVED
+-> HELD
+-> reservation ACTIVE
+```
+
+This demonstrates the normal external reservation flow.
+
+### Scenario B: definitive decline
+
+```text
+provider.reserve()
+-> DECLINED
+-> line FAILED
+-> reservation RELEASING
+-> compensation
+-> CANCELLED
+```
+
+This demonstrates a business failure.
+
+### Scenario C: ambiguous result
+
+```text
+provider.reserve()
+-> UNKNOWN
+-> HOLD_UNKNOWN
+-> reconciliation
+-> RESERVED / NOT_RESERVED / UNKNOWN
+```
+
+This demonstrates the more important distributed-systems failure: the caller
+does not know whether the remote side effect happened.
+
+These scenarios were chosen because they cover success, deterministic failure,
+and ambiguous failure without building unnecessary production provider
+infrastructure.
+
+## 18. What I would change for production
+
+Given more time and production requirements, I would add only when justified by
+measured needs:
+
+- real provider adapters with authentication, timeouts, retries, and
+  provider-specific rate limits;
+- secret-manager integration for provider credentials;
+- stronger semantics for query-only providers;
+- structured metrics/tracing and manual-reconciliation tooling;
+- request-body fingerprinting for stronger idempotency-key misuse detection;
+- per-provider worker isolation when one provider can starve others;
+- transactional outbox + broker if database polling becomes a measured
+  bottleneck or other services need reservation events;
+- archival/partitioning when terminal reservation history materially affects
+  operational queries.
+
+The central correctness choices would remain the same: guarded local inventory
+updates, explicit reservation states, short database transactions, durable
+provider work, and truthful handling of ambiguous external outcomes.
