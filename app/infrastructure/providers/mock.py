@@ -49,6 +49,9 @@ class MockReservationProviderGateway:
         self.release_outcome = release_outcome
         self.lookup_outcome = lookup_outcome
         self._hold_refs: dict[str, str] = {}
+        self.hold_calls = 0
+        self.release_calls = 0
+        self.lookup_calls = 0
 
     async def hold(
         self,
@@ -59,6 +62,7 @@ class MockReservationProviderGateway:
         expires_at,
     ) -> ProviderHoldResult:
         del stock_source_id, quantity, expires_at
+        self.hold_calls += 1
         if self.hold_outcome == ProviderHoldOutcome.DECLINED:
             return ProviderHoldResult(
                 outcome=ProviderHoldOutcome.DECLINED,
@@ -84,6 +88,7 @@ class MockReservationProviderGateway:
         release_key: str,
     ) -> ProviderReleaseResult:
         del stock_source_id, external_hold_ref, release_key
+        self.release_calls += 1
         if self.release_outcome == ProviderReleaseOutcome.UNKNOWN:
             return ProviderReleaseResult(
                 outcome=ProviderReleaseOutcome.UNKNOWN,
@@ -92,6 +97,7 @@ class MockReservationProviderGateway:
         return ProviderReleaseResult(outcome=ProviderReleaseOutcome.RELEASED)
 
     async def get_hold(self, *, hold_key: str) -> ProviderHoldLookupResult:
+        self.lookup_calls += 1
         if self.lookup_outcome == ProviderHoldLookupOutcome.UNKNOWN:
             return ProviderHoldLookupResult(
                 outcome=ProviderHoldLookupOutcome.UNKNOWN,
