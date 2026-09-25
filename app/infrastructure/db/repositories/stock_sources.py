@@ -34,6 +34,10 @@ class SqlAlchemyStockSourceRepository:
                 provider_kind=provider.kind,
                 provider_enabled=provider.enabled,
                 source_enabled=source.enabled,
-                reservation_supported=provider.kind == ProviderKind.INTERNAL,
+                # The current persisted provider model distinguishes only
+                # internal and external sources. Gateway registration will
+                # enforce the external provider contract in the next step.
+                reservation_supported=provider.kind
+                in {ProviderKind.INTERNAL, ProviderKind.EXTERNAL},
             )
         return result

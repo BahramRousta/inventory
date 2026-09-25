@@ -1,11 +1,17 @@
 from functools import lru_cache
+from uuid import UUID
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://reservation:reservation@127.0.0.1:5454/reservation"
     reservation_ttl_seconds: int = 900
+    external_provider_id: UUID | None = None
+    external_provider_base_url: str | None = None
+    external_provider_hold_timeout_seconds: float = 5.0
+    provider_worker_poll_interval_seconds: float = Field(default=1.0, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

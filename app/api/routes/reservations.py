@@ -4,6 +4,7 @@ from app.api.schemas.reservations import CreateReservationRequest, CreateReserva
 from app.application.dto.reservations import CreateReservationCommand, ReservationItemCommand
 from app.application.services.create_reservation import CreateReservationService
 from app.bootstrap.dependencies import get_create_reservation_service
+from app.domain.enums import ReservationStatus
 
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
@@ -29,8 +30,11 @@ async def create_reservation(
             ),
         )
     )
-    # Internal-only slice always resolves synchronously to ACTIVE.
-    response.status_code = status.HTTP_201_CREATED
+    response.status_code = (
+        status.HTTP_202_ACCEPTED
+        if result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}
+        else status.HTTP_201_CREATED
+    )
     return CreateReservationResponse(
         reservation_id=result.reservation_id,
         status=result.status,

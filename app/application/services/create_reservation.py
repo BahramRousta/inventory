@@ -1,29 +1,27 @@
-import hashlib
-import json
-from collections import defaultdict
 from datetime import timedelta
 from typing import Callable
 from uuid import UUID, uuid4
 
-from sqlalchemy.util import await_
-
 from app.application.dto.reservations import (
     CreateReservationCommand,
     CreateReservationResult,
-    ReservationItemCommand, ReservationLineResult,
+    ReservationItemCommand,
+    ReservationLineResult,
 )
 from app.application.errors import (
-    IdempotencyConflict,
     InsufficientStock,
-    InvalidReservationItems,
     PersistenceConflict,
     ProductSourceMismatch,
     SourceDisabled,
     SourceNotReservable,
 )
 from app.application.ports.clock import Clock
+from app.application.ports.provider_gateway import (
+    InMemoryProviderGatewayRegistry,
+    ProviderGatewayRegistry,
+)
 from app.application.ports.repositories import UnitOfWork
-from app.domain.enums import ProviderKind, ReservationStatus
+from app.domain.enums import ProviderKind, ReservationLineStatus, ReservationStatus
 
 
 class CreateReservationService:
@@ -33,19 +31,21 @@ class CreateReservationService:
         uow_factory: Callable[[], UnitOfWork],
         clock: Clock,
         ttl_seconds: int,
+        provider_gateways: ProviderGatewayRegistry | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ttl_seconds = ttl_seconds
+        self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
         """
         1- check idempotency and avoid duplication
         2- validate product belong to the sources
         3- create reservation row
-        4- per item in reservation try to hold the stock, if any item fails, raise InsufficientStock
-        5- set reservation status to ACTIVE
-        6- return reservation result
+        4- hold internal lines and persist external lines as pending
+        5- activate only when every line is internally held
+        6- return the persisted reservation state
         :param command:
         :return:
         """
@@ -77,21 +77,42 @@ class CreateReservationService:
                     status=ReservationStatus.RESERVING,
                 )
 
+                has_external_lines = False
                 for item in command.items:
-                    if not await uow.inventory.try_hold(item.stock_source_id, item.quantity):
-                        raise InsufficientStock(
-                            f"Insufficient stock for source {item.stock_source_id}."
+                    source = sources[item.stock_source_id]
+                    if source.provider_kind == ProviderKind.INTERNAL:
+                        if not await uow.inventory.try_hold(
+                            item.stock_source_id, item.quantity
+                        ):
+                            raise InsufficientStock(
+                                f"Insufficient stock for source {item.stock_source_id}."
+                            )
+                        await uow.reservations.add_line(
+                            reservation_id, item, ReservationLineStatus.HELD
                         )
-                    await uow.reservations.add_held_line(reservation_id, item)
+                        continue
 
-                await uow.reservations.set_status(reservation_id, ReservationStatus.ACTIVE)
+                    has_external_lines = True
+                    await uow.reservations.add_line(
+                        reservation_id, item, ReservationLineStatus.HOLD_PENDING
+                    )
+
+                reservation_status = (
+                    ReservationStatus.RESERVING
+                    if has_external_lines
+                    else ReservationStatus.ACTIVE
+                )
+                if reservation_status == ReservationStatus.ACTIVE:
+                    await uow.reservations.set_status(
+                        reservation_id, ReservationStatus.ACTIVE
+                    )
                 lines = await uow.reservations.get_lines(reservation_id)
                 await uow.commit()
                 return CreateReservationResult(
                     reservation_id=reservation_id,
-                    status=ReservationStatus.ACTIVE,
+                    status=reservation_status,
                     expires_at=expires_at,
-                    payment_allowed=True,
+                    payment_allowed=reservation_status == ReservationStatus.ACTIVE,
                     lines=lines,
                 )
         except PersistenceConflict:
@@ -123,8 +144,7 @@ class CreateReservationService:
             lines=lines,
         )
 
-    @staticmethod
-    def _validate_sources(items, sources) -> None:
+    def _validate_sources(self, items, sources) -> None:
         for item in items:
             source = sources.get(item.stock_source_id)
             if source is None or source.product_id != item.product_id:
@@ -133,7 +153,14 @@ class CreateReservationService:
                 )
             if not source.source_enabled or not source.provider_enabled:
                 raise SourceDisabled(f"Source {item.stock_source_id} is disabled.")
-            if source.provider_kind != ProviderKind.INTERNAL or not source.reservation_supported:
+            if not source.reservation_supported:
                 raise SourceNotReservable(
-                    f"Source {item.stock_source_id} is not supported by the internal-only slice."
+                    f"Source {item.stock_source_id} is not reservable."
+                )
+            if (
+                source.provider_kind == ProviderKind.EXTERNAL
+                and self._provider_gateways.get(source.provider_id) is None
+            ):
+                raise SourceNotReservable(
+                    f"Provider {source.provider_id} has no registered hold gateway."
                 )
