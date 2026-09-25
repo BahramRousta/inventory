@@ -85,9 +85,7 @@ async def test_external_hold_success_activates_reservation_and_persists_provider
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-hold-ok"),
@@ -133,9 +131,7 @@ async def test_external_definitive_decline_moves_to_releasing_then_cancelled(
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-decline"),
@@ -165,9 +161,7 @@ async def test_external_definitive_decline_moves_to_releasing_then_cancelled(
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, work.reservation_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert reservation.release_reason == "CREATE_FAILED"
@@ -185,9 +179,7 @@ async def test_timeout_after_provider_side_effect_stays_unknown_until_reconcilia
     )
     registry = _registry(source.provider_id, fake_provider_url, timeout=0.05)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-timeout"),
@@ -210,9 +202,7 @@ async def test_timeout_after_provider_side_effect_stays_unknown_until_reconcilia
     assert line is not None
     assert line.status == ReservationLineStatus.HOLD_UNKNOWN
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         unknown_snapshot = await client.get(
             f"/reservations/{work.reservation_id}",
             headers=create_headers(user_id="user-1"),
@@ -254,9 +244,7 @@ async def test_timeout_after_provider_side_effect_stays_unknown_until_reconcilia
     assert line.status == ReservationLineStatus.HELD
     assert line.external_hold_ref == provider_state.json()["hold_ref"]
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         reconciled_snapshot = await client.get(
             f"/reservations/{work.reservation_id}",
             headers=create_headers(user_id="user-1"),
@@ -276,9 +264,7 @@ async def test_external_cancel_releases_remote_hold_and_finishes_cancelled(
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-release-create"),
@@ -289,9 +275,7 @@ async def test_external_cancel_releases_remote_hold_and_finishes_cancelled(
     work = await _claim_and_process_hold(postgres_session_factory, registry)
     hold_key = f"{work.reservation_id}:{source.source_id}:HOLD"
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         cancelled = await client.post(
             f"/reservations/{work.reservation_id}/cancel",
             headers=create_headers(user_id="user-1"),
@@ -367,9 +351,7 @@ async def test_mixed_source_external_decline_compensates_internal_hold_and_creat
         ]
     }
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="mixed-decline"),
@@ -402,9 +384,7 @@ async def test_mixed_source_external_decline_compensates_internal_hold_and_creat
                 .order_by(ReservationLineModel.stock_source_id)
             )
         ).all()
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
 
     assert stock is not None
     assert stock.held == 0
@@ -428,10 +408,8 @@ async def test_external_payment_success_uses_hold_as_final_allocation_and_create
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
-        created = await client.post(
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
+        await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-pay-create"),
             json=create_body(source),
@@ -449,9 +427,7 @@ async def test_external_payment_success_uses_hold_as_final_allocation_and_create
     original_ref = held_line.external_hold_ref
 
     event_id = uuid4()
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         paid = await client.post(
             f"/reservations/{work.reservation_id}/payment-outcome",
             headers=create_headers(user_id="user-1"),
@@ -497,9 +473,7 @@ async def test_pending_external_create_replay_stays_202_and_does_not_duplicate_w
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         first = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-pending-replay"),
@@ -544,9 +518,7 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
     registry = _registry(source.provider_id, fake_provider_url)
     event_id = uuid4()
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-pay-fail-pending"),
@@ -575,9 +547,7 @@ async def test_payment_failure_before_external_hold_claim_finishes_cancelled_wit
                 ReservationLineModel.reservation_id == reservation_id
             )
         )
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert reservation.release_reason == "PAYMENT_FAILED"
@@ -602,9 +572,7 @@ async def test_cancel_before_external_hold_claim_finishes_cancelled_without_prov
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-cancel-pending"),
@@ -653,9 +621,7 @@ async def test_expiry_before_external_hold_claim_finishes_expired_without_provid
     )
     registry = _registry(source.provider_id, fake_provider_url)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="ext-expire-pending"),
@@ -671,9 +637,7 @@ async def test_expiry_before_external_hold_claim_finishes_expired_without_provid
         await session.execute(
             update(ReservationModel)
             .where(ReservationModel.id == reservation_id)
-            .values(
-                expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
-            )
+            .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
         )
 
     claimed = await ExpireReservingReservationService(
@@ -715,9 +679,7 @@ async def test_payment_failure_while_hold_unknown_reconciles_then_releases_real_
     )
     registry = _registry(source.provider_id, fake_provider_url, timeout=0.05)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="unknown-then-fail"),
@@ -741,9 +703,7 @@ async def test_payment_failure_while_hold_unknown_reconciles_then_releases_real_
     assert reservation.status == ReservationStatus.RESERVING
 
     event_id = uuid4()
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         failed = await client.post(
             f"/reservations/{work.reservation_id}/payment-outcome",
             headers=create_headers(user_id="user-1"),
@@ -841,9 +801,7 @@ async def test_release_timeout_after_remote_side_effect_reconciles_before_termin
     )
     registry = _registry(source.provider_id, fake_provider_url, timeout=0.05)
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         created = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="release-unknown-create"),
@@ -854,9 +812,7 @@ async def test_release_timeout_after_remote_side_effect_reconciles_before_termin
     work = await _claim_and_process_hold(postgres_session_factory, registry)
     hold_key = f"{work.reservation_id}:{source.source_id}:HOLD"
 
-    async with api_client(
-        postgres_session_factory, provider_gateways=registry
-    ) as client:
+    async with api_client(postgres_session_factory, provider_gateways=registry) as client:
         cancelled = await client.post(
             f"/reservations/{work.reservation_id}/cancel",
             headers=create_headers(user_id="user-1"),

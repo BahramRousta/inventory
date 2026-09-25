@@ -39,9 +39,7 @@ class CancelReservationService:
                 ReservationStatus.EXPIRED,
                 ReservationStatus.RELEASING,
             }:
-                changed = await uow.reservations.begin_releasing(
-                    reservation_id, reason
-                )
+                changed = await uow.reservations.begin_releasing(reservation_id, reason)
                 if not changed:
                     raise ReservationStateConflict(
                         f"Reservation {reservation_id} cannot be cancelled from "
@@ -59,8 +57,6 @@ class CancelReservationService:
                 created_at=reservation.created_at,
                 expires_at=reservation.expires_at,
                 payment_allowed=False,
-                requires_attention=any(
-                    line.status in _ATTENTION_STATES for line in lines
-                ),
+                requires_attention=any(line.status in _ATTENTION_STATES for line in lines),
                 lines=lines,
             )

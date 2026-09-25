@@ -4,6 +4,7 @@ Revision ID: b7d9a2c4e6f1
 Revises: aa44ccf9f7e6
 Create Date: 2026-09-25
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -16,8 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("reservations", sa.Column("request_fingerprint", sa.String(length=64), nullable=True))
-
     for name in (
         "supports_check",
         "supports_hold",
@@ -29,7 +28,9 @@ def upgrade() -> None:
             "inventory_providers",
             sa.Column(name, sa.Boolean(), nullable=False, server_default=sa.false()),
         )
-    op.add_column("inventory_providers", sa.Column("config_key", sa.String(length=160), nullable=True))
+    op.add_column(
+        "inventory_providers", sa.Column("config_key", sa.String(length=160), nullable=True)
+    )
     op.add_column(
         "inventory_providers",
         sa.Column("credential_ref", sa.String(length=255), nullable=True),
@@ -90,4 +91,3 @@ def downgrade() -> None:
         "supports_check",
     ):
         op.drop_column("inventory_providers", name)
-    op.drop_column("reservations", "request_fingerprint")

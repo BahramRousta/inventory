@@ -1,5 +1,3 @@
-import hashlib
-import json
 from datetime import timedelta
 from typing import Callable
 from uuid import UUID, uuid4
@@ -7,13 +5,9 @@ from uuid import UUID, uuid4
 from app.application.dto.reservations import (
     CreateReservationCommand,
     CreateReservationResult,
-    ReservationItemCommand,
-    ReservationLineResult,
 )
 from app.application.errors import (
-    IdempotencyConflict,
     InsufficientStock,
-    InvalidReservationItems,
     PersistenceConflict,
     ProductSourceMismatch,
     SourceDisabled,
@@ -81,9 +75,7 @@ class CreateReservationService:
                 for item in items:
                     source = sources[item.stock_source_id]
                     if source.provider_kind == ProviderKind.INTERNAL:
-                        if not await uow.inventory.try_hold(
-                            item.stock_source_id, item.quantity
-                        ):
+                        if not await uow.inventory.try_hold(item.stock_source_id, item.quantity):
                             raise InsufficientStock(
                                 f"Insufficient stock for source {item.stock_source_id}."
                             )
@@ -97,9 +89,7 @@ class CreateReservationService:
                         )
 
                 if not has_external_lines:
-                    await uow.reservations.set_status(
-                        reservation_id, ReservationStatus.ACTIVE
-                    )
+                    await uow.reservations.set_status(reservation_id, ReservationStatus.ACTIVE)
                 await uow.commit()
 
             return await self._load_result(reservation_id, replayed=False)

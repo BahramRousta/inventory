@@ -37,9 +37,7 @@ async def main() -> None:
     async with get_session() as session:
         async with session.begin():
             internal = await session.scalar(
-                select(InventoryProviderModel).where(
-                    InventoryProviderModel.name == "InternalStock"
-                )
+                select(InventoryProviderModel).where(InventoryProviderModel.name == "InternalStock")
             )
             if internal is None:
                 internal = InventoryProviderModel(
@@ -52,9 +50,7 @@ async def main() -> None:
                 await session.flush()
             internal.enabled = True
 
-            external = await session.get(
-                InventoryProviderModel, DEMO_EXTERNAL_PROVIDER_ID
-            )
+            external = await session.get(InventoryProviderModel, DEMO_EXTERNAL_PROVIDER_ID)
             if external is None:
                 external = InventoryProviderModel(
                     id=DEMO_EXTERNAL_PROVIDER_ID,
@@ -73,9 +69,7 @@ async def main() -> None:
 
             products: dict[str, tuple[ProductModel, int]] = {}
             for sku, name, on_hand in DEMO_PRODUCTS:
-                product = await session.scalar(
-                    select(ProductModel).where(ProductModel.sku == sku)
-                )
+                product = await session.scalar(select(ProductModel).where(ProductModel.sku == sku))
                 if product is None:
                     product = ProductModel(id=uuid4(), sku=sku, name=name)
                     session.add(product)

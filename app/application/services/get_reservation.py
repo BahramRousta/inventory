@@ -29,8 +29,6 @@ class GetReservationService:
                 created_at=reservation.created_at,
                 expires_at=reservation.expires_at,
                 payment_allowed=reservation.status == ReservationStatus.ACTIVE,
-                requires_attention=any(
-                    line.status in _ATTENTION_STATES for line in lines
-                ),
+                requires_attention=any(line.status in _ATTENTION_STATES for line in lines),
                 lines=lines,
             )

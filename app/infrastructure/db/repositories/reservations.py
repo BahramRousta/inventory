@@ -44,7 +44,6 @@ class SqlAlchemyReservationRepository:
             reservation_id=row.id,
             user_id=row.user_id,
             idempotency_key=row.idempotency_key,
-            request_fingerprint=row.request_fingerprint,
             status=row.status,
             created_at=_as_utc(row.created_at),
             expires_at=_as_utc(row.expires_at),
@@ -56,7 +55,6 @@ class SqlAlchemyReservationRepository:
         reservation_id: UUID,
         user_id: str,
         idempotency_key: str,
-        request_fingerprint: str,
         expires_at: datetime,
         status: ReservationStatus,
     ) -> None:
@@ -65,7 +63,6 @@ class SqlAlchemyReservationRepository:
                 id=reservation_id,
                 user_id=user_id,
                 idempotency_key=idempotency_key,
-                request_fingerprint=request_fingerprint,
                 expires_at=expires_at,
                 status=status,
             )
@@ -89,9 +86,7 @@ class SqlAlchemyReservationRepository:
                 quantity=item.quantity,
                 status=status,
                 held_at=(
-                    datetime.now(timezone.utc)
-                    if status == ReservationLineStatus.HELD
-                    else None
+                    datetime.now(timezone.utc) if status == ReservationLineStatus.HELD else None
                 ),
             )
         )
@@ -173,9 +168,7 @@ class SqlAlchemyReservationRepository:
         await self._session.flush()
         return result.rowcount == 1
 
-    async def claim_line_for_release(
-        self, reservation_id: UUID, stock_source_id: UUID
-    ) -> bool:
+    async def claim_line_for_release(self, reservation_id: UUID, stock_source_id: UUID) -> bool:
         result = await self._session.execute(
             update(ReservationLineModel)
             .where(
@@ -188,9 +181,7 @@ class SqlAlchemyReservationRepository:
         await self._session.flush()
         return result.rowcount == 1
 
-    async def mark_line_released(
-        self, reservation_id: UUID, stock_source_id: UUID
-    ) -> None:
+    async def mark_line_released(self, reservation_id: UUID, stock_source_id: UUID) -> None:
         await self._session.execute(
             update(ReservationLineModel)
             .where(
@@ -329,9 +320,7 @@ class SqlAlchemyReservationRepository:
             expires_at=_as_utc(row.expires_at),
         )
 
-    async def is_external_hold_pending(
-        self, reservation_id: UUID, stock_source_id: UUID
-    ) -> bool:
+    async def is_external_hold_pending(self, reservation_id: UUID, stock_source_id: UUID) -> bool:
         return (
             await self._session.scalar(
                 select(ReservationLineModel.id).where(
@@ -653,9 +642,7 @@ class SqlAlchemyReservationRepository:
         await self._session.flush()
         return recovered
 
-    async def claim_expired_reserving_reservations(
-        self, *, limit: int
-    ) -> tuple[UUID, ...]:
+    async def claim_expired_reserving_reservations(self, *, limit: int) -> tuple[UUID, ...]:
         reservation_ids = (
             await self._session.scalars(
                 select(ReservationModel.id)
@@ -690,7 +677,9 @@ class SqlAlchemyReservationRepository:
         self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
     ) -> bool:
         return await self._return_claim(
-            reservation_id, stock_source_id, claim_token,
+            reservation_id,
+            stock_source_id,
+            claim_token,
             ReservationLineStatus.HOLD_IN_PROGRESS,
             ReservationLineStatus.HOLD_UNKNOWN,
         )
@@ -699,7 +688,9 @@ class SqlAlchemyReservationRepository:
         self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
     ) -> bool:
         return await self._return_claim(
-            reservation_id, stock_source_id, claim_token,
+            reservation_id,
+            stock_source_id,
+            claim_token,
             ReservationLineStatus.RELEASE_IN_PROGRESS,
             ReservationLineStatus.RELEASE_UNKNOWN,
         )
@@ -708,7 +699,9 @@ class SqlAlchemyReservationRepository:
         self, reservation_id: UUID, stock_source_id: UUID, claim_token: UUID
     ) -> bool:
         return await self._return_claim(
-            reservation_id, stock_source_id, claim_token,
+            reservation_id,
+            stock_source_id,
+            claim_token,
             ReservationLineStatus.RELEASE_IN_PROGRESS,
             ReservationLineStatus.RELEASE_PENDING,
         )
@@ -757,7 +750,10 @@ class SqlAlchemyReservationRepository:
                 )
                 .join(ReservationModel, ReservationModel.id == ReservationLineModel.reservation_id)
                 .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
-                .join(InventoryProviderModel, InventoryProviderModel.id == StockSourceModel.provider_id)
+                .join(
+                    InventoryProviderModel,
+                    InventoryProviderModel.id == StockSourceModel.provider_id,
+                )
                 .where(
                     ReservationLineModel.status == from_status,
                     InventoryProviderModel.kind == ProviderKind.EXTERNAL,
@@ -773,11 +769,16 @@ class SqlAlchemyReservationRepository:
             line.status = ReservationLineStatus.HOLD_IN_PROGRESS
             line.provider_claim_token = token
             line.provider_lease_until = lease_until
-            claimed.append(ClaimedExternalHoldRecord(
-                reservation_id=line.reservation_id, stock_source_id=line.stock_source_id,
-                provider_id=provider_id, quantity=line.quantity,
-                expires_at=_as_utc(expires_at), claim_token=token,
-            ))
+            claimed.append(
+                ClaimedExternalHoldRecord(
+                    reservation_id=line.reservation_id,
+                    stock_source_id=line.stock_source_id,
+                    provider_id=provider_id,
+                    quantity=line.quantity,
+                    expires_at=_as_utc(expires_at),
+                    claim_token=token,
+                )
+            )
         await self._session.flush()
         return tuple(claimed)
 
@@ -794,7 +795,10 @@ class SqlAlchemyReservationRepository:
             await self._session.execute(
                 select(ReservationLineModel, StockSourceModel.provider_id)
                 .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
-                .join(InventoryProviderModel, InventoryProviderModel.id == StockSourceModel.provider_id)
+                .join(
+                    InventoryProviderModel,
+                    InventoryProviderModel.id == StockSourceModel.provider_id,
+                )
                 .where(
                     ReservationLineModel.status == from_status,
                     ReservationLineModel.external_hold_ref.is_not(None),
@@ -811,11 +815,15 @@ class SqlAlchemyReservationRepository:
             line.status = ReservationLineStatus.RELEASE_IN_PROGRESS
             line.provider_claim_token = token
             line.provider_lease_until = lease_until
-            claimed.append(ClaimedExternalReleaseRecord(
-                reservation_id=line.reservation_id, stock_source_id=line.stock_source_id,
-                provider_id=provider_id, external_hold_ref=line.external_hold_ref,
-                claim_token=token,
-            ))
+            claimed.append(
+                ClaimedExternalReleaseRecord(
+                    reservation_id=line.reservation_id,
+                    stock_source_id=line.stock_source_id,
+                    provider_id=provider_id,
+                    external_hold_ref=line.external_hold_ref,
+                    claim_token=token,
+                )
+            )
         await self._session.flush()
         return tuple(claimed)
 
@@ -870,12 +878,14 @@ class SqlAlchemyReservationRepository:
         )
 
     async def get_lines(self, reservation_id: UUID) -> tuple[ReservationLineResult, ...]:
-        rows = (await self._session.execute(
-            select(ReservationLineModel, StockSourceModel.product_id)
-            .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
-            .where(ReservationLineModel.reservation_id == reservation_id)
-            .order_by(ReservationLineModel.stock_source_id)
-        )).all()
+        rows = (
+            await self._session.execute(
+                select(ReservationLineModel, StockSourceModel.product_id)
+                .join(StockSourceModel, StockSourceModel.id == ReservationLineModel.stock_source_id)
+                .where(ReservationLineModel.reservation_id == reservation_id)
+                .order_by(ReservationLineModel.stock_source_id)
+            )
+        ).all()
         return tuple(
             ReservationLineResult(
                 product_id=product_id,

@@ -4,6 +4,7 @@ Revision ID: d2f6a8c0e4b1
 Revises: c1e4f7a9b2d3
 Create Date: 2026-09-25
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -40,9 +41,7 @@ def downgrade() -> None:
         ),
         sa.Column("payload_hash", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["reservation_id"], ["reservations.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["reservation_id"], ["reservations.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("event_id"),
     )
     op.create_index(
@@ -65,18 +64,10 @@ def downgrade() -> None:
             "quantity > 0",
             name="ck_order_line_quantity_positive",
         ),
-        sa.ForeignKeyConstraint(
-            ["order_id"], ["orders.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["product_id"], ["products.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["provider_id"], ["inventory_providers.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["stock_source_id"], ["stock_sources.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["order_id"], ["orders.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["provider_id"], ["inventory_providers.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["stock_source_id"], ["stock_sources.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "order_id",

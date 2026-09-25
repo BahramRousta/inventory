@@ -13,8 +13,10 @@ class SqlAlchemyInternalInventoryRepository:
     async def try_hold(self, stock_source_id: UUID, quantity: int) -> bool:
         stmt = (
             update(InternalStockModel)
-            .where(InternalStockModel.stock_source_id == stock_source_id)
-            .where(InternalStockModel.on_hand - InternalStockModel.held >= quantity)
+            .where(
+                InternalStockModel.stock_source_id == stock_source_id,
+                InternalStockModel.on_hand - InternalStockModel.held >= quantity,
+            )
             .values(
                 held=InternalStockModel.held + quantity,
             )
@@ -31,7 +33,6 @@ class SqlAlchemyInternalInventoryRepository:
             .returning(InternalStockModel.stock_source_id)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
-
 
     async def consume_hold(self, stock_source_id: UUID, quantity: int) -> bool:
         stmt = (

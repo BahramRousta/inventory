@@ -15,10 +15,7 @@ class ProviderGatewayFactory:
 
     def create_registry(self) -> InMemoryProviderGatewayRegistry:
         settings = self._settings
-        if (
-            settings.external_provider_id is None
-            or settings.external_provider_base_url is None
-        ):
+        if settings.external_provider_id is None or settings.external_provider_base_url is None:
             return InMemoryProviderGatewayRegistry()
 
         gateway = ExternalHoldHttpGateway(
@@ -26,6 +23,4 @@ class ProviderGatewayFactory:
             hold_timeout_seconds=settings.external_provider_hold_timeout_seconds,
             api_key=settings.external_provider_api_key,
         )
-        return InMemoryProviderGatewayRegistry(
-            {settings.external_provider_id: gateway}
-        )
+        return InMemoryProviderGatewayRegistry({settings.external_provider_id: gateway})

@@ -46,17 +46,13 @@ class ProcessPaymentOutcomeService:
         async with self._uow_factory() as uow:
             reservation = await uow.reservations.get_by_id(command.reservation_id)
             if reservation is None or reservation.user_id != command.user_id:
-                raise ReservationNotFound(
-                    f"Reservation {command.reservation_id} was not found."
-                )
+                raise ReservationNotFound(f"Reservation {command.reservation_id} was not found.")
 
             order_id: UUID | None = None
 
             if command.outcome == PaymentOutcome.SUCCESS:
                 if reservation.status == ReservationStatus.CONFIRMED:
-                    order_id = await uow.orders.get_by_reservation_id(
-                        command.reservation_id
-                    )
+                    order_id = await uow.orders.get_by_reservation_id(command.reservation_id)
                     if order_id is None:
                         raise ReservationStateConflict(
                             "Confirmed reservation is missing its order."
@@ -77,8 +73,7 @@ class ProcessPaymentOutcomeService:
                     await uow.commit()
                 else:
                     raise ReservationStateConflict(
-                        f"Payment success cannot finalize reservation from "
-                        f"{reservation.status}."
+                        f"Payment success cannot finalize reservation from {reservation.status}."
                     )
             else:
                 if reservation.status in {
@@ -106,9 +101,7 @@ class ProcessPaymentOutcomeService:
 
         return await self._snapshot(command.reservation_id, command.user_id)
 
-    async def _snapshot(
-        self, reservation_id: UUID, user_id: str
-    ) -> PaymentOutcomeResult:
+    async def _snapshot(self, reservation_id: UUID, user_id: str) -> PaymentOutcomeResult:
         async with self._uow_factory() as uow:
             reservation = await uow.reservations.get_by_id(reservation_id)
             if reservation is None or reservation.user_id != user_id:
@@ -122,8 +115,6 @@ class ProcessPaymentOutcomeService:
                 created_at=reservation.created_at,
                 expires_at=reservation.expires_at,
                 payment_allowed=reservation.status == ReservationStatus.ACTIVE,
-                requires_attention=any(
-                    line.status in _ATTENTION_STATES for line in lines
-                ),
+                requires_attention=any(line.status in _ATTENTION_STATES for line in lines),
                 lines=lines,
             )

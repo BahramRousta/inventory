@@ -57,9 +57,7 @@ async def seed_internal_source(sqlite_session_factory):
                 enabled=True,
             )
         )
-        session.add(
-            InternalStockModel(stock_source_id=source_id, on_hand=5, held=0)
-        )
+        session.add(InternalStockModel(stock_source_id=source_id, on_hand=5, held=0))
     return product_id, source_id
 
 

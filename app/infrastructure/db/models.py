@@ -61,9 +61,7 @@ class StockSourceModel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
-        UniqueConstraint(
-            "product_id", "provider_id", name="uq_stock_source_product_provider"
-        ),
+        UniqueConstraint("product_id", "provider_id", name="uq_stock_source_product_provider"),
     )
 
 
@@ -103,9 +101,7 @@ class ReservationModel(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        UniqueConstraint(
-            "user_id", "idempotency_key", name="uq_reservation_user_idempotency"
-        ),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_reservation_user_idempotency"),
         Index("ix_reservation_status_expiry", "status", "expires_at"),
     )
 
@@ -133,9 +129,7 @@ class ReservationLineModel(Base):
 
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_reservation_line_quantity_positive"),
-        UniqueConstraint(
-            "reservation_id", "stock_source_id", name="uq_reservation_line_source"
-        ),
+        UniqueConstraint("reservation_id", "stock_source_id", name="uq_reservation_line_source"),
         Index("ix_reservation_line_work_claim", "status", "provider_lease_until"),
     )
 
@@ -151,4 +145,3 @@ class OrderModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
-

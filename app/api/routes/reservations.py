@@ -99,9 +99,7 @@ async def get_reservation(
     user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: GetReservationService = Depends(get_reservation_service),
 ) -> ReservationResponse:
-    return _reservation_response(
-        await service.execute(reservation_id, user_id=user_id)
-    )
+    return _reservation_response(await service.execute(reservation_id, user_id=user_id))
 
 
 @router.post(

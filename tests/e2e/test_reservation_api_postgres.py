@@ -12,7 +12,6 @@ from app.application.services.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
 from app.domain.enums import (
-    PaymentOutcome,
     ReservationLineStatus,
     ReservationStatus,
 )
@@ -23,7 +22,6 @@ from app.infrastructure.db.models import (
     ReservationLineModel,
     ReservationModel,
 )
-from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from tests.e2e.support import (
     api_client,
     create_body,
@@ -60,9 +58,7 @@ async def test_health_is_available_and_does_not_mutate_database(postgres_session
 async def test_create_internal_reservation_returns_201_and_holds_stock(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CREATE-OK", on_hand=5
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="CREATE-OK", on_hand=5)
 
     async with api_client(postgres_session_factory) as client:
         response = await _create_internal(client, source, quantity=2)
@@ -87,7 +83,6 @@ async def test_create_internal_reservation_returns_201_and_holds_stock(
 
     assert reservation is not None
     assert reservation.user_id == "user-1"
-    assert reservation.request_fingerprint
     assert reservation.status == ReservationStatus.ACTIVE
     assert line is not None
     assert line.quantity == 2
@@ -100,9 +95,7 @@ async def test_create_internal_reservation_returns_201_and_holds_stock(
 async def test_duplicate_request_lines_are_canonicalized_before_stock_mutation(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="DUP-LINES", on_hand=10
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="DUP-LINES", on_hand=10)
     body = {
         "items": [
             {
@@ -149,17 +142,11 @@ async def test_duplicate_request_lines_are_canonicalized_before_stock_mutation(
 async def test_idempotent_create_replay_returns_200_and_does_not_hold_twice(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="IDEMPOTENT", on_hand=5
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="IDEMPOTENT", on_hand=5)
 
     async with api_client(postgres_session_factory) as client:
-        first = await _create_internal(
-            client, source, key="same-create-key", quantity=2
-        )
-        second = await _create_internal(
-            client, source, key="same-create-key", quantity=2
-        )
+        first = await _create_internal(client, source, key="same-create-key", quantity=2)
+        second = await _create_internal(client, source, key="same-create-key", quantity=2)
 
     assert first.status_code == 201
     assert second.status_code == 200
@@ -167,9 +154,7 @@ async def test_idempotent_create_replay_returns_200_and_does_not_hold_twice(
 
     async with postgres_session_factory() as session:
         stock = await session.get(InternalStockModel, source.source_id)
-        reservations = await session.scalar(
-            select(func.count()).select_from(ReservationModel)
-        )
+        reservations = await session.scalar(select(func.count()).select_from(ReservationModel))
 
     assert reservations == 1
     assert stock is not None
@@ -179,17 +164,11 @@ async def test_idempotent_create_replay_returns_200_and_does_not_hold_twice(
 async def test_idempotency_key_with_changed_body_returns_conflict_without_mutation(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="IDEM-CONFLICT", on_hand=5
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="IDEM-CONFLICT", on_hand=5)
 
     async with api_client(postgres_session_factory) as client:
-        first = await _create_internal(
-            client, source, key="body-key", quantity=1
-        )
-        conflict = await _create_internal(
-            client, source, key="body-key", quantity=2
-        )
+        first = await _create_internal(client, source, key="body-key", quantity=1)
+        conflict = await _create_internal(client, source, key="body-key", quantity=2)
 
     assert first.status_code == 201
     assert conflict.status_code == 409
@@ -209,14 +188,10 @@ async def test_idempotency_key_with_changed_body_returns_conflict_without_mutati
 async def test_insufficient_internal_stock_rolls_back_reservation_and_hold(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="NO-STOCK", on_hand=1
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="NO-STOCK", on_hand=1)
 
     async with api_client(postgres_session_factory) as client:
-        response = await _create_internal(
-            client, source, key="too-many", quantity=2
-        )
+        response = await _create_internal(client, source, key="too-many", quantity=2)
 
     assert response.status_code == 409
     assert response.json()["code"] == "INSUFFICIENT_STOCK"
@@ -234,9 +209,7 @@ async def test_insufficient_internal_stock_rolls_back_reservation_and_hold(
 async def test_product_source_mismatch_returns_422_without_database_mutation(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="MISMATCH", on_hand=5
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="MISMATCH", on_hand=5)
     wrong_product_id = uuid4()
     async with postgres_session_factory.begin() as session:
         session.add(
@@ -370,9 +343,7 @@ async def test_external_provider_without_required_capabilities_is_rejected(
     assert await reservation_count(postgres_session_factory) == 0
 
     async with postgres_session_factory() as session:
-        lines = await session.scalar(
-            select(func.count()).select_from(ReservationLineModel)
-        )
+        lines = await session.scalar(select(func.count()).select_from(ReservationLineModel))
     assert lines == 0
 
 
@@ -396,18 +367,14 @@ async def test_external_provider_without_gateway_is_rejected_before_creation(
     assert await reservation_count(postgres_session_factory) == 0
 
     async with postgres_session_factory() as session:
-        count = await session.scalar(
-            select(func.count()).select_from(ReservationLineModel)
-        )
+        count = await session.scalar(select(func.count()).select_from(ReservationLineModel))
     assert count == 0
 
 
 async def test_get_reservation_returns_persisted_snapshot_for_owner(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="GET-OWNER", on_hand=3
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="GET-OWNER", on_hand=3)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="get-owner")
@@ -434,9 +401,7 @@ async def test_get_reservation_returns_persisted_snapshot_for_owner(
 async def test_get_reservation_hides_other_users_reservation(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="GET-WRONG-OWNER", on_hand=3
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="GET-WRONG-OWNER", on_hand=3)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="owner-create")
@@ -461,9 +426,7 @@ async def test_get_reservation_hides_other_users_reservation(
 async def test_cancel_internal_reservation_releases_stock_and_finishes_cancelled(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CANCEL", on_hand=4
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="CANCEL", on_hand=4)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="cancel-create", quantity=2)
@@ -512,15 +475,11 @@ async def test_cancel_internal_reservation_releases_stock_and_finishes_cancelled
 async def test_payment_success_confirms_consumes_stock_and_creates_one_order_with_lines(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-SUCCESS", on_hand=4
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-SUCCESS", on_hand=4)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
-        created = await _create_internal(
-            client, source, key="pay-success-create", quantity=2
-        )
+        created = await _create_internal(client, source, key="pay-success-create", quantity=2)
         reservation_id = UUID(created.json()["reservation_id"])
         response = await client.post(
             f"/reservations/{reservation_id}/payment-outcome",
@@ -557,9 +516,7 @@ async def test_payment_success_confirms_consumes_stock_and_creates_one_order_wit
 async def test_duplicate_payment_success_event_is_idempotent_and_does_not_duplicate_order(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-DUP", on_hand=3
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-DUP", on_hand=3)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
@@ -582,9 +539,7 @@ async def test_duplicate_payment_success_event_is_idempotent_and_does_not_duplic
     assert first.json()["order_id"] == second.json()["order_id"]
 
     async with postgres_session_factory() as session:
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
         stock = await session.get(InternalStockModel, source.source_id)
 
     assert order_count == 1
@@ -596,15 +551,11 @@ async def test_duplicate_payment_success_event_is_idempotent_and_does_not_duplic
 async def test_payment_failure_enters_releasing_then_restores_internal_availability(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-FAIL", on_hand=3
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-FAIL", on_hand=3)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
-        created = await _create_internal(
-            client, source, key="pay-fail-create", quantity=2
-        )
+        created = await _create_internal(client, source, key="pay-fail-create", quantity=2)
         reservation_id = UUID(created.json()["reservation_id"])
         response = await client.post(
             f"/reservations/{reservation_id}/payment-outcome",
@@ -630,9 +581,7 @@ async def test_payment_failure_enters_releasing_then_restores_internal_availabil
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert stock is not None
@@ -644,9 +593,7 @@ async def test_payment_failure_enters_releasing_then_restores_internal_availabil
 async def test_payment_outcome_requires_matching_owner_without_state_change(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-WRONG-OWNER", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-WRONG-OWNER", on_hand=2)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
@@ -673,9 +620,7 @@ async def test_payment_outcome_requires_matching_owner_without_state_change(
 async def test_expiry_finishes_as_expired_and_late_payment_success_cannot_resurrect(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="EXPIRE", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="EXPIRE", on_hand=2)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
@@ -686,9 +631,7 @@ async def test_expiry_finishes_as_expired_and_late_payment_success_cannot_resurr
             await session.execute(
                 update(ReservationModel)
                 .where(ReservationModel.id == reservation_id)
-                .values(
-                    expires_at=datetime.now(timezone.utc) - timedelta(seconds=5)
-                )
+                .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=5))
             )
 
         claimed = await ExpireReservingReservationService(
@@ -711,9 +654,7 @@ async def test_expiry_finishes_as_expired_and_late_payment_success_cannot_resurr
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.EXPIRED
@@ -727,9 +668,7 @@ async def test_expiry_finishes_as_expired_and_late_payment_success_cannot_resurr
 async def test_direct_confirm_admin_endpoint_is_idempotent_and_uses_same_finalization(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="DIRECT-CONFIRM", on_hand=3
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="DIRECT-CONFIRM", on_hand=3)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="confirm-create")
@@ -751,9 +690,7 @@ async def test_direct_confirm_admin_endpoint_is_idempotent_and_uses_same_finaliz
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
     assert stock is not None
@@ -783,9 +720,7 @@ async def test_direct_confirm_rejects_wrong_owner_without_database_mutation(
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
     assert stock is not None
@@ -796,9 +731,7 @@ async def test_direct_confirm_rejects_wrong_owner_without_database_mutation(
 async def test_confirmed_reservation_cannot_be_cancelled(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CANCEL-CONFIRMED", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="CANCEL-CONFIRMED", on_hand=2)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="cancel-confirmed-create")
@@ -818,9 +751,7 @@ async def test_confirmed_reservation_cannot_be_cancelled(
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
         stock = await session.get(InternalStockModel, source.source_id)
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
@@ -833,9 +764,7 @@ async def test_confirmed_reservation_cannot_be_cancelled(
 async def test_invalid_quantity_validation_creates_no_database_state(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="INVALID-QTY", on_hand=5
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="INVALID-QTY", on_hand=5)
 
     async with api_client(postgres_session_factory) as client:
         response = await client.post(
@@ -865,9 +794,7 @@ async def test_invalid_quantity_validation_creates_no_database_state(
 async def test_duplicate_line_total_overflow_is_rejected_before_stock_mutation(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="OVERFLOW-QTY", on_hand=10
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="OVERFLOW-QTY", on_hand=10)
     max_quantity = 2_147_483_647
 
     async with api_client(postgres_session_factory) as client:
@@ -916,9 +843,7 @@ async def test_get_unknown_reservation_returns_404_and_database_remains_empty(
     assert await reservation_count(postgres_session_factory) == 0
 
     async with postgres_session_factory() as session:
-        line_count = await session.scalar(
-            select(func.count()).select_from(ReservationLineModel)
-        )
+        line_count = await session.scalar(select(func.count()).select_from(ReservationLineModel))
     assert line_count == 0
 
 
@@ -952,9 +877,7 @@ async def test_cancel_rejects_wrong_owner_without_changing_hold(
 async def test_repeated_cancel_does_not_release_internal_stock_twice(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CANCEL-REPLAY", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="CANCEL-REPLAY", on_hand=2)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="cancel-replay-create")
@@ -973,9 +896,7 @@ async def test_repeated_cancel_does_not_release_internal_stock_twice(
     assert first.json()["status"] == "RELEASING"
     assert second.json()["status"] == "RELEASING"
 
-    service = ProcessReleasingReservationService(
-        uow_factory=uow_factory(postgres_session_factory)
-    )
+    service = ProcessReleasingReservationService(uow_factory=uow_factory(postgres_session_factory))
     await service.execute(reservation_id)
     await service.execute(reservation_id)
 
@@ -1007,9 +928,7 @@ async def test_repeated_cancel_does_not_release_internal_stock_twice(
 async def test_new_failure_event_after_success_is_rejected_as_contradictory(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-LATE-FAILURE", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-LATE-FAILURE", on_hand=2)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="late-failure-create")
@@ -1033,9 +952,7 @@ async def test_new_failure_event_after_success_is_rejected_as_contradictory(
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
     assert order_count == 1
@@ -1044,9 +961,7 @@ async def test_new_failure_event_after_success_is_rejected_as_contradictory(
 async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CONFIRM-EXPIRED", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="CONFIRM-EXPIRED", on_hand=2)
 
     async with api_client(postgres_session_factory) as client:
         created = await _create_internal(client, source, key="confirm-expired-create")
@@ -1056,9 +971,7 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
             await session.execute(
                 update(ReservationModel)
                 .where(ReservationModel.id == reservation_id)
-                .values(
-                    expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
-                )
+                .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
             )
 
         response = await client.post(
@@ -1072,9 +985,7 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
     assert stock is not None
@@ -1124,7 +1035,6 @@ async def test_multi_item_payment_success_confirms_all_reservation_lines_and_cre
 
     assert paid.status_code == 200
     assert paid.json()["status"] == "CONFIRMED"
-    order_id = UUID(paid.json()["order_id"])
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
@@ -1135,23 +1045,14 @@ async def test_multi_item_payment_success_confirms_all_reservation_lines_and_cre
                 )
             )
         ).all()
-        first_stock = await session.get(
-            InternalStockModel, first_source.source_id
-        )
-        second_stock = await session.get(
-            InternalStockModel, second_source.source_id
-        )
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        first_stock = await session.get(InternalStockModel, first_source.source_id)
+        second_stock = await session.get(InternalStockModel, second_source.source_id)
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
     assert len(reservation_lines) == 2
-    assert all(
-        line.status == ReservationLineStatus.CONFIRMED
-        for line in reservation_lines
-    )
+    assert all(line.status == ReservationLineStatus.CONFIRMED for line in reservation_lines)
     assert order_count == 1
     assert first_stock is not None
     assert first_stock.on_hand == 1
@@ -1210,7 +1111,6 @@ async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
         stock = await session.get(InternalStockModel, source.source_id)
 
     assert reservation is not None
-    assert reservation.request_fingerprint
     assert line is not None
     assert line.quantity == 3
     assert stock is not None
@@ -1220,9 +1120,7 @@ async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
 async def test_repeated_payment_success_still_requires_reservation_owner(
     postgres_session_factory,
 ):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="PAY-REPLAY-OWNER", on_hand=2
-    )
+    source = await seed_internal_source(postgres_session_factory, sku="PAY-REPLAY-OWNER", on_hand=2)
     event_id = uuid4()
 
     async with api_client(postgres_session_factory) as client:
@@ -1245,9 +1143,7 @@ async def test_repeated_payment_success_still_requires_reservation_owner(
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
     assert order_count == 1

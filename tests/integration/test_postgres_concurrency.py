@@ -48,6 +48,7 @@ async def test_two_concurrent_api_checkouts_for_last_internal_unit_exactly_one_w
     )
 
     async with api_client(postgres_session_factory) as client:
+
         async def reserve(user_id: str):
             return await client.post(
                 "/reservations",
@@ -69,12 +70,8 @@ async def test_two_concurrent_api_checkouts_for_last_internal_unit_exactly_one_w
 
     async with postgres_session_factory() as session:
         stock = await session.get(InternalStockModel, source.source_id)
-        reservations = await session.scalar(
-            select(func.count()).select_from(ReservationModel)
-        )
-        lines = await session.scalar(
-            select(func.count()).select_from(ReservationLineModel)
-        )
+        reservations = await session.scalar(select(func.count()).select_from(ReservationModel))
+        lines = await session.scalar(select(func.count()).select_from(ReservationLineModel))
 
     assert stock is not None
     assert stock.on_hand == 1
@@ -120,7 +117,6 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
                     id=first_reservation,
                     user_id="user-a",
                     idempotency_key="claim-a",
-                    request_fingerprint="a" * 64,
                     status=ReservationStatus.RESERVING,
                     expires_at=expires_at,
                 ),
@@ -128,7 +124,6 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
                     id=second_reservation,
                     user_id="user-b",
                     idempotency_key="claim-b",
-                    request_fingerprint="b" * 64,
                     status=ReservationStatus.RESERVING,
                     expires_at=expires_at,
                 ),
@@ -169,18 +164,14 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
             await session.scalars(
                 select(ReservationLineModel)
                 .where(
-                    ReservationLineModel.reservation_id.in_(
-                        [first_reservation, second_reservation]
-                    )
+                    ReservationLineModel.reservation_id.in_([first_reservation, second_reservation])
                 )
                 .order_by(ReservationLineModel.reservation_id)
             )
         ).all()
 
     assert len(lines) == 2
-    assert all(
-        line.status == ReservationLineStatus.HOLD_IN_PROGRESS for line in lines
-    )
+    assert all(line.status == ReservationLineStatus.HOLD_IN_PROGRESS for line in lines)
     assert all(line.provider_claim_token is not None for line in lines)
     assert all(line.provider_lease_until is not None for line in lines)
 
@@ -201,7 +192,6 @@ async def test_stale_provider_claim_is_recovered_to_unknown_without_duplicate_tr
                 id=reservation_id,
                 user_id="user-1",
                 idempotency_key="stale-claim",
-                request_fingerprint="c" * 64,
                 status=ReservationStatus.RESERVING,
                 expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
             )
@@ -213,23 +203,18 @@ async def test_stale_provider_claim_is_recovered_to_unknown_without_duplicate_tr
                 quantity=1,
                 status=ReservationLineStatus.HOLD_IN_PROGRESS,
                 provider_claim_token=claim_token,
-                provider_lease_until=datetime.now(timezone.utc)
-                - timedelta(seconds=10),
+                provider_lease_until=datetime.now(timezone.utc) - timedelta(seconds=10),
             )
         )
 
     async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
-        recovered = await uow.reservations.recover_expired_provider_claims(
-            limit=10
-        )
+        recovered = await uow.reservations.recover_expired_provider_claims(limit=10)
         await uow.commit()
 
     assert recovered == 1
 
     async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
-        recovered_again = await uow.reservations.recover_expired_provider_claims(
-            limit=10
-        )
+        recovered_again = await uow.reservations.recover_expired_provider_claims(limit=10)
         await uow.commit()
     assert recovered_again == 0
 
@@ -303,9 +288,7 @@ async def test_payment_and_expiry_concurrency_has_one_local_transition_winner(
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.CONFIRMED
@@ -342,9 +325,7 @@ async def test_expiry_wins_when_payment_success_arrives_after_database_ttl(
         await session.execute(
             update(ReservationModel)
             .where(ReservationModel.id == reservation_id)
-            .values(
-                expires_at=datetime.now(timezone.utc) - timedelta(milliseconds=1)
-            )
+            .values(expires_at=datetime.now(timezone.utc) - timedelta(milliseconds=1))
         )
 
     payment_service = ProcessPaymentOutcomeService(
@@ -379,9 +360,7 @@ async def test_expiry_wins_when_payment_success_arrives_after_database_ttl(
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
         stock = await session.get(InternalStockModel, source.source_id)
-        order_count = await session.scalar(
-            select(func.count()).select_from(OrderModel)
-        )
+        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
 
     assert reservation is not None
     assert reservation.status == ReservationStatus.RELEASING
@@ -402,6 +381,7 @@ async def test_concurrent_same_create_idempotency_key_holds_stock_once(
     )
 
     async with api_client(postgres_session_factory) as client:
+
         async def create_once():
             return await client.post(
                 "/reservations",
@@ -420,12 +400,8 @@ async def test_concurrent_same_create_idempotency_key_holds_stock_once(
     reservation_id = UUID(first.json()["reservation_id"])
     async with postgres_session_factory() as session:
         stock = await session.get(InternalStockModel, source.source_id)
-        reservation_count = await session.scalar(
-            select(func.count()).select_from(ReservationModel)
-        )
-        line_count = await session.scalar(
-            select(func.count()).select_from(ReservationLineModel)
-        )
+        reservation_count = await session.scalar(select(func.count()).select_from(ReservationModel))
+        line_count = await session.scalar(select(func.count()).select_from(ReservationLineModel))
         line = await session.scalar(
             select(ReservationLineModel).where(
                 ReservationLineModel.reservation_id == reservation_id

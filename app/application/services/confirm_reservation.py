@@ -39,9 +39,7 @@ class ConfirmReservationService:
         self._uow_factory = uow_factory
         self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
-    async def execute(
-        self, reservation_id: UUID, *, user_id: str
-    ) -> ConfirmReservationResult:
+    async def execute(self, reservation_id: UUID, *, user_id: str) -> ConfirmReservationResult:
         async with self._uow_factory() as uow:
             reservation = await uow.reservations.get_by_id(reservation_id)
             if reservation is None or reservation.user_id != user_id:
@@ -50,16 +48,13 @@ class ConfirmReservationService:
             if reservation.status == ReservationStatus.CONFIRMED:
                 order_id = await uow.orders.get_by_reservation_id(reservation_id)
                 if order_id is None:
-                    raise ReservationStateConflict(
-                        "Confirmed reservation is missing its order."
-                    )
+                    raise ReservationStateConflict("Confirmed reservation is missing its order.")
                 lines = await uow.reservations.get_lines(reservation_id)
                 return _result(reservation, order_id, lines)
 
             if reservation.status != ReservationStatus.ACTIVE:
                 raise ReservationStateConflict(
-                    f"Reservation {reservation_id} cannot be confirmed from "
-                    f"{reservation.status}."
+                    f"Reservation {reservation_id} cannot be confirmed from {reservation.status}."
                 )
 
             if not await uow.reservations.begin_confirming_if_active(reservation_id):

@@ -39,9 +39,7 @@ class ProcessReleasingReservationService:
                     raise RuntimeError(
                         f"Could not release internal hold for source {line.stock_source_id}."
                     )
-                await uow.reservations.mark_line_released(
-                    reservation_id, line.stock_source_id
-                )
+                await uow.reservations.mark_line_released(reservation_id, line.stock_source_id)
             await uow.reservations.cancel_if_all_lines_resolved(reservation_id)
             await uow.commit()
             return True

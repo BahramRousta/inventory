@@ -41,12 +41,12 @@ class StockSourceRecord:
     provider_enabled: bool
     source_enabled: bool
 
+
 @dataclass(frozen=True)
 class ReservationIdentityRecord:
     reservation_id: UUID
     user_id: str
     idempotency_key: str
-    request_fingerprint: str | None
     status: ReservationStatus
     created_at: datetime
     expires_at: datetime

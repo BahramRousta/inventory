@@ -32,15 +32,15 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
             created_at = created_at.replace(tzinfo=timezone.utc)
         else:
             created_at = created_at.astimezone(timezone.utc)
-        return ReservationIdentityRecord(
+        self.record = ReservationIdentityRecord(
             reservation_id=row.id,
             user_id=row.user_id,
             idempotency_key=row.idempotency_key,
-            request_fingerprint=row.request_fingerprint,
             status=row.status,
             created_at=created_at,
             expires_at=expires_at,
         )
+        return self.record
 
     async def begin_confirming_if_active(self, reservation_id: UUID) -> bool:
         result = await self._session.execute(
@@ -55,9 +55,7 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
         await self._session.flush()
         return result.rowcount == 1
 
-    async def mark_line_confirmed(
-        self, reservation_id: UUID, stock_source_id: UUID
-    ) -> None:
+    async def mark_line_confirmed(self, reservation_id: UUID, stock_source_id: UUID) -> None:
         await self._session.execute(
             update(ReservationLineModel)
             .where(

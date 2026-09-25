@@ -143,9 +143,7 @@ class ExternalHoldHttpGateway(ProviderGateway):
             )
 
         if response.status_code == 404:
-            return ProviderHoldLookupResult(
-                outcome=ProviderHoldLookupOutcome.NOT_HELD
-            )
+            return ProviderHoldLookupResult(outcome=ProviderHoldLookupOutcome.NOT_HELD)
         if not response.is_success:
             return ProviderHoldLookupResult(
                 outcome=ProviderHoldLookupOutcome.UNKNOWN,
@@ -155,9 +153,7 @@ class ExternalHoldHttpGateway(ProviderGateway):
             body: dict[str, Any] = response.json()
             state = body["status"]
             if state in {"RELEASED", "NOT_HELD"}:
-                return ProviderHoldLookupResult(
-                    outcome=ProviderHoldLookupOutcome.NOT_HELD
-                )
+                return ProviderHoldLookupResult(outcome=ProviderHoldLookupOutcome.NOT_HELD)
             if state != "HELD":
                 raise ValueError("unrecognized hold state")
             external_hold_ref = body["hold_ref"]

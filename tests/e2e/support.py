@@ -198,17 +198,13 @@ def create_body(source: SeededSource, *, quantity: int = 1) -> dict:
 
 async def reservation_count(factory) -> int:
     async with factory() as session:
-        return int(
-            await session.scalar(select(func.count()).select_from(ReservationModel))
-            or 0
-        )
+        return int(await session.scalar(select(func.count()).select_from(ReservationModel)) or 0)
 
 
 async def reservation_line_count(factory) -> int:
     async with factory() as session:
         return int(
-            await session.scalar(select(func.count()).select_from(ReservationLineModel))
-            or 0
+            await session.scalar(select(func.count()).select_from(ReservationLineModel)) or 0
         )
 
 
@@ -232,6 +228,4 @@ def registry_with_capabilities(
     provider_id: UUID,
     capabilities: ProviderCapabilities,
 ) -> InMemoryProviderGatewayRegistry:
-    return InMemoryProviderGatewayRegistry(
-        {provider_id: CapabilityOnlyGateway(capabilities)}
-    )
+    return InMemoryProviderGatewayRegistry({provider_id: CapabilityOnlyGateway(capabilities)})
