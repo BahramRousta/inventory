@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from httpx import ASGITransport, AsyncClient
 
-from app.application.services.create_reservation import CreateReservationService
+from app.application.services.create.create_reservation import CreateReservationService
 from app.bootstrap.dependencies import get_create_reservation_service
 from app.main import app
 
