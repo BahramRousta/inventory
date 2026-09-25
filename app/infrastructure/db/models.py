@@ -46,16 +46,6 @@ class InventoryProviderModel(Base):
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    supports_check: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    supports_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    supports_release: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    supports_get_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    hold_is_final_allocation: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    config_key: Mapped[str | None] = mapped_column(String(160))
-    credential_ref: Mapped[str | None] = mapped_column(String(255))
-
 
 class StockSourceModel(Base):
     __tablename__ = "stock_sources"
