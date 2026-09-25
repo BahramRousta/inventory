@@ -130,7 +130,7 @@ identical contract.
 
 **Implementation:**
 
-1. Do not expose a payment-processing or payment-outcome endpoint.
+1. Do not expose a payment-specific endpoint.
 2. After payment succeeds outside this service, the caller invokes
    `POST /reservations/{id}/confirm`.
 3. If checkout fails or is abandoned, the caller invokes cancel or the
