@@ -17,7 +17,6 @@ class SqlAlchemyInternalInventoryRepository:
             .where(InternalStockModel.on_hand - InternalStockModel.held >= quantity)
             .values(
                 held=InternalStockModel.held + quantity,
-                version=InternalStockModel.version + 1,
             )
             .returning(InternalStockModel.stock_source_id)
         )

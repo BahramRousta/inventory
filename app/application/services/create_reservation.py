@@ -39,6 +39,16 @@ class CreateReservationService:
         self._ttl_seconds = ttl_seconds
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
+        """
+        1- check idempotency and avoid duplication
+        2- validate product belong to the sources
+        3- create reservation row
+        4- per item in reservation try to hold the stock, if any item fails, raise InsufficientStock
+        5- set reservation status to ACTIVE
+        6- return reservation result
+        :param command:
+        :return:
+        """
         try:
             async with self._uow_factory() as uow:
                 existing = await uow.reservations.get_by_idempotency_key(

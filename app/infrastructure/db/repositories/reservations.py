@@ -44,7 +44,6 @@ class SqlAlchemyReservationRepository:
         reservation_id: UUID,
         user_id: str,
         idempotency_key: str,
-        request_hash: str,
         expires_at: datetime,
         status: ReservationStatus,
     ) -> None:
@@ -53,7 +52,6 @@ class SqlAlchemyReservationRepository:
                 id=reservation_id,
                 user_id=user_id,
                 idempotency_key=idempotency_key,
-                request_hash=request_hash,
                 expires_at=expires_at,
                 status=status,
             )

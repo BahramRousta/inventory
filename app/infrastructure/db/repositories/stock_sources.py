@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.dto.reservations import StockSourceRecord
-from app.domain.enums import ProviderCapability
-from app.infrastructure.db.models import StockSourceModel
+from app.domain.enums import ProviderKind
+from app.infrastructure.db.models import StockSourceModel, InventoryProviderModel
 
 
 class SqlAlchemyStockSourceRepository:
@@ -15,17 +15,25 @@ class SqlAlchemyStockSourceRepository:
     async def get_many(self, source_ids: tuple[UUID, ...]) -> dict[UUID, StockSourceRecord]:
         if not source_ids:
             return {}
-        rows = (await self._session.scalars(
-            select(StockSourceModel).where(StockSourceModel.id.in_(source_ids))
-        )).all()
+        statement = (
+            select(StockSourceModel, InventoryProviderModel)
+            .join(
+                InventoryProviderModel,
+                StockSourceModel.provider_id == InventoryProviderModel.id,
+            )
+            .where(StockSourceModel.id.in_(source_ids))
+        )
+        rows = (await self._session.execute(statement)).all()
+
         result: dict[UUID, StockSourceRecord] = {}
-        for row in rows:
-            result[row.id] = StockSourceRecord(
-                stock_source_id=row.id,
-                product_id=row.product_id,
-                provider_id=row.provider_id,
-                provider_kind=row.provider.kind,
-                provider_enabled=row.provider.enabled,
-                source_enabled=row.enabled,
+        for source, provider in rows:
+            result[source.id] = StockSourceRecord(
+                stock_source_id=source.id,
+                product_id=source.product_id,
+                provider_id=source.provider_id,
+                provider_kind=provider.kind,
+                provider_enabled=provider.enabled,
+                source_enabled=source.enabled,
+                reservation_supported=provider.kind == ProviderKind.INTERNAL,
             )
         return result

@@ -28,6 +28,7 @@ class StockSourceRecord:
     provider_kind: ProviderKind
     provider_enabled: bool
     source_enabled: bool
+    reservation_supported: bool
 
 
 @dataclass(frozen=True)
