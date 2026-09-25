@@ -208,6 +208,13 @@ async def test_stale_provider_claim_is_recovered_to_unknown_without_duplicate_tr
 
     assert recovered == 1
 
+    async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
+        recovered_again = await uow.reservations.recover_expired_provider_claims(
+            limit=10
+        )
+        await uow.commit()
+    assert recovered_again == 0
+
     async with postgres_session_factory() as session:
         line = await session.scalar(
             select(ReservationLineModel).where(
