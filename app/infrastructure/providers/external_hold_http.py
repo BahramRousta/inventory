@@ -6,6 +6,7 @@ from uuid import UUID
 import httpx
 
 from app.application.ports.provider_gateway import (
+    ProviderCapabilities,
     ProviderGateway,
     ProviderHoldOutcome,
     ProviderHoldResult,
@@ -17,6 +18,13 @@ from app.application.ports.provider_gateway import (
 
 
 class ExternalHoldHttpGateway(ProviderGateway):
+    capabilities = ProviderCapabilities(
+        supports_check=False,
+        supports_hold=True,
+        supports_release=True,
+        supports_get_hold=True,
+        hold_is_final_allocation=True,
+    )
     """Adapter for the assignment's hold-capable HTTP provider contract.
 
     The configured provider accepts ``POST /holds`` with an idempotency key.
@@ -25,9 +33,24 @@ class ExternalHoldHttpGateway(ProviderGateway):
     other responses are ambiguous because the remote HOLD may have executed.
     """
 
-    def __init__(self, *, base_url: str, hold_timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        hold_timeout_seconds: float,
+        api_key: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = httpx.Timeout(hold_timeout_seconds)
+        self._api_key = api_key
+
+    def _headers(self, *, idempotency_key: str | None = None) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
     async def hold(
         self,
@@ -48,7 +71,7 @@ class ExternalHoldHttpGateway(ProviderGateway):
                 response = await client.post(
                     f"{self._base_url}/holds",
                     json=payload,
-                    headers={"Idempotency-Key": hold_key},
+                    headers=self._headers(idempotency_key=hold_key),
                 )
         except httpx.RequestError:
             return ProviderHoldResult(
@@ -97,7 +120,7 @@ class ExternalHoldHttpGateway(ProviderGateway):
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     f"{self._base_url}/holds/{quote(external_hold_ref, safe='')}/release",
-                    headers={"Idempotency-Key": release_key},
+                    headers=self._headers(idempotency_key=release_key),
                 )
         except httpx.RequestError:
             return ProviderReleaseResult(
@@ -116,7 +139,8 @@ class ExternalHoldHttpGateway(ProviderGateway):
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.get(
-                    f"{self._base_url}/holds/{quote(hold_key, safe='')}"
+                    f"{self._base_url}/holds/{quote(hold_key, safe='')}",
+                    headers=self._headers(),
                 )
         except httpx.RequestError:
             return ProviderHoldLookupResult(
