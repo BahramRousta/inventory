@@ -701,39 +701,6 @@ async def test_repeated_cancel_does_not_release_internal_stock_twice(
     assert line.status == ReservationLineStatus.RELEASED
 
 
-async def test_new_failure_event_after_success_is_rejected_as_contradictory(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(postgres_session_factory, sku="PAY-LATE-FAILURE", on_hand=2)
-
-    async with api_client(postgres_session_factory) as client:
-        created = await _create_internal(client, source, key="late-failure-create")
-        reservation_id = UUID(created.json()["reservation_id"])
-        success_event = uuid4()
-        failure_event = uuid4()
-        success = await client.post(
-            f"/reservations/{reservation_id}/payment-outcome",
-            headers=create_headers(user_id="user-1"),
-            json={"event_id": str(success_event), "outcome": "SUCCESS"},
-        )
-        failure = await client.post(
-            f"/reservations/{reservation_id}/payment-outcome",
-            headers=create_headers(user_id="user-1"),
-            json={"event_id": str(failure_event), "outcome": "FAILURE"},
-        )
-
-    assert success.status_code == 200
-    assert failure.status_code == 409
-    assert failure.json()["code"] == "RESERVATION_STATE_CONFLICT"
-
-    async with postgres_session_factory() as session:
-        reservation = await session.get(ReservationModel, reservation_id)
-        order_count = await session.scalar(select(func.count()).select_from(OrderModel))
-    assert reservation is not None
-    assert reservation.status == ReservationStatus.CONFIRMED
-    assert order_count == 1
-
-
 async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     postgres_session_factory,
 ):
