@@ -9,6 +9,7 @@ from app.application.dto.reservations import PaymentOutcomeCommand
 from app.application.services.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
+from app.application.errors import ReservationStateConflict
 from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
 from app.domain.enums import (
     PaymentOutcome,
@@ -295,3 +296,141 @@ async def test_payment_and_expiry_concurrency_has_one_local_transition_winner(
     assert stock.on_hand == 0
     assert stock.held == 0
     assert order_count == 1
+
+
+async def test_concurrent_duplicate_payment_event_is_harmless_and_creates_one_order(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory,
+        sku="CONCURRENT-PAYMENT-DUP",
+        on_hand=1,
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(
+                user_id="dup-race-user",
+                idempotency_key="dup-race-create",
+            ),
+            json=create_body(source),
+        )
+    assert created.status_code == 201
+    reservation_id = UUID(created.json()["reservation_id"])
+
+    event_id = uuid4()
+    command = PaymentOutcomeCommand(
+        event_id=event_id,
+        reservation_id=reservation_id,
+        user_id="dup-race-user",
+        outcome=PaymentOutcome.SUCCESS,
+    )
+
+    async def deliver():
+        return await ProcessPaymentOutcomeService(
+            uow_factory=uow_factory(postgres_session_factory)
+        ).execute(command)
+
+    first, second = await asyncio.gather(deliver(), deliver())
+
+    assert first.status == ReservationStatus.CONFIRMED
+    assert second.status == ReservationStatus.CONFIRMED
+    assert first.order_id == second.order_id
+
+    from app.infrastructure.db.models import PaymentEventModel
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        stock = await session.get(InternalStockModel, source.source_id)
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+        event_count = await session.scalar(
+            select(func.count()).select_from(PaymentEventModel)
+        )
+
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CONFIRMED
+    assert stock is not None
+    assert stock.on_hand == 0
+    assert stock.held == 0
+    assert order_count == 1
+    assert event_count == 1
+
+
+async def test_expiry_wins_when_payment_success_arrives_after_database_ttl(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory,
+        sku="EXPIRY-WINS-RACE",
+        on_hand=1,
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(
+                user_id="expiry-race-user",
+                idempotency_key="expiry-race-create",
+            ),
+            json=create_body(source),
+        )
+    assert created.status_code == 201
+    reservation_id = UUID(created.json()["reservation_id"])
+
+    from sqlalchemy import update
+
+    async with postgres_session_factory.begin() as session:
+        await session.execute(
+            update(ReservationModel)
+            .where(ReservationModel.id == reservation_id)
+            .values(
+                expires_at=datetime.now(timezone.utc) - timedelta(milliseconds=1)
+            )
+        )
+
+    payment_service = ProcessPaymentOutcomeService(
+        uow_factory=uow_factory(postgres_session_factory)
+    )
+    expiry_service = ExpireReservingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    )
+
+    async def pay():
+        try:
+            await payment_service.execute(
+                PaymentOutcomeCommand(
+                    event_id=uuid4(),
+                    reservation_id=reservation_id,
+                    user_id="expiry-race-user",
+                    outcome=PaymentOutcome.SUCCESS,
+                )
+            )
+            return "confirmed"
+        except ReservationStateConflict:
+            return "rejected"
+
+    payment_result, expired_ids = await asyncio.gather(
+        pay(),
+        expiry_service.execute_batch(limit=10),
+    )
+
+    assert payment_result == "rejected"
+    assert reservation_id in expired_ids
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        stock = await session.get(InternalStockModel, source.source_id)
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+    assert reservation.release_reason == "EXPIRED"
+    assert stock is not None
+    assert stock.on_hand == 1
+    assert stock.held == 1
+    assert order_count == 0
