@@ -24,6 +24,8 @@ class ProcessPendingProviderHoldService:
 
     async def execute(self, work: ClaimedExternalHoldRecord) -> bool:
         hold_key = f"{work.reservation_id}:{work.stock_source_id}:HOLD"
+
+        # this helped us to be sure other worker don't process and changed it
         async with self._uow_factory() as uow:
             if not await uow.reservations.is_external_hold_claim_owned(
                 work.reservation_id, work.stock_source_id, work.claim_token
@@ -83,6 +85,8 @@ class ProcessPendingProviderHoldService:
             )
             if not persisted:
                 return False
+
+            # we check if all sibling lines are processed before finalizing the reservation itself
             if line_status == ReservationLineStatus.HELD:
                 await uow.reservations.activate_if_all_lines_held(work.reservation_id)
             elif line_status == ReservationLineStatus.FAILED:
