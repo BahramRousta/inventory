@@ -12,7 +12,7 @@ during checkout.
 - TTL expiry and truthful `EXPIRED` vs `CANCELLED` terminal semantics;
 - required `Idempotency-Key` request header with body fingerprint checking;
 - trusted payment-outcome orchestration;
-- immutable orders with order lines;
+- final order creation linked to the reservation;
 - provider capabilities declared by adapters and runtime configuration injected from environment;
 - standalone fake HTTP provider with success, decline and
   timeout-after-side-effect scenarios;
@@ -193,7 +193,7 @@ The E2E fixture creates and drops the schema for each test, so
 
 Coverage includes API create/read/cancel/payment/direct-confirm behavior,
 idempotency and changed-body conflict, duplicate-line canonicalization,
-insufficient stock rollback, owner checks, expiry, immutable order lines,
+insufficient stock rollback, owner checks, expiry, immutable reservation lines,
 final-unit concurrency, provider HOLD success/decline/timeout-after-side-effect,
 reconciliation, provider RELEASE, mixed-source compensation, SKIP LOCKED work
 claims, stale-lease recovery, and payment/expiry transition coordination.

@@ -66,7 +66,7 @@ database.
 Checkout finalization is driven by
 `POST /reservations/{id}/payment-outcome`.
 
-A payment event contains a globally unique `event_id` and either `SUCCESS`
+A payment outcome contains a globally unique `event_id` and either `SUCCESS`
 or `FAILURE`. Its payload hash is stored so duplicate delivery is harmless,
 while reuse of the event ID with different content is a conflict.
 
@@ -74,7 +74,7 @@ On success, PostgreSQL conditionally transitions `ACTIVE -> CONFIRMING` only
 when the reservation has not expired. This database transition races safely
 with expiry. Internal held stock is consumed, external lines are accepted only
 for providers whose HOLD is declared final allocation, every line is marked
-`CONFIRMED`, and one immutable order plus order lines is inserted in the same
+`CONFIRMED`, and one final order is inserted in the same
 local transaction.
 
 On payment failure, `RESERVING|ACTIVE -> RELEASING` is claimed atomically and
@@ -121,8 +121,8 @@ For this interview assignment:
 - Only one configured external HTTP provider is used in the runnable demo.
 - Provider HOLD is the final external allocation, avoiding an undocumented
   remote CONFIRM protocol.
-- Orders snapshot product/source/provider/quantity/allocation reference so they
-  remain understandable without mutable reservation rows.
+- The final order is linked one-to-one with its confirmed reservation; detailed
+  item/source state remains on the reservation lines for this assignment scope.
 - Authentication and payment processing remain outside the service boundary.
 
 ## What would change with more time

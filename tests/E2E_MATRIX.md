@@ -32,7 +32,7 @@ independent HTTP process.
 | Payment | reused event ID/different payload conflicts | `test_reservation_api_postgres.py` |
 | Payment | separate contradictory FAILURE after success is rejected | `test_reservation_api_postgres.py` |
 | Payment | FAILURE releases held internal inventory | `test_reservation_api_postgres.py` |
-| Payment | wrong owner records no payment event | `test_reservation_api_postgres.py` |
+| Payment | wrong owner records no payment outcome | `test_reservation_api_postgres.py` |
 | Expiry | expired internal reservation releases and finishes EXPIRED | `test_reservation_api_postgres.py` |
 | Expiry | late success cannot resurrect EXPIRED reservation | `test_reservation_api_postgres.py` |
 | Direct confirm | deprecated admin flow finalizes once and is owner-scoped | `test_reservation_api_postgres.py` |
