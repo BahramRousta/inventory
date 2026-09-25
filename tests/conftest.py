@@ -46,12 +46,6 @@ async def seed_internal_source(sqlite_session_factory):
                 name="InternalStock",
                 kind=ProviderKind.INTERNAL,
                 enabled=True,
-                supports_check=True,
-                supports_hold=True,
-                supports_release=True,
-                supports_get_hold=True,
-                hold_is_final_allocation=True,
-                config_key="internal-test",
             )
         )
         session.add(
