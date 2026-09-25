@@ -1,5 +1,26 @@
 # Reservation Assignment Remediation Workflow
 
+## Implementation status
+
+This branch implements Steps 1–8 and Step 10.
+
+- Step 1: complete — lifecycle repository is wired through the unit of work.
+- Step 2: complete — release reason determines EXPIRED vs CANCELLED.
+- Step 3: complete — HTTP contract uses trusted user/idempotency headers,
+  canonical request fingerprints, snapshot metadata, Location and retry hints.
+- Step 4: complete — trusted, idempotent payment outcomes orchestrate success
+  and failure transitions.
+- Step 5: complete — the configured provider contract is explicitly
+  **HOLD is final allocation** and is persisted as capability metadata.
+- Step 6: complete — orders persist immutable order lines.
+- Step 7: complete — provider capabilities and non-secret config references are
+  persisted and checked for reservation eligibility.
+- Step 8: complete — Compose runs a standalone fake HTTP provider and separate
+  hold/release/reconciliation/expiry workers.
+- Step 9: intentionally deferred — no new tests are added or run in this pass.
+- Step 10: complete — README, architecture, async-state-machine and scalability
+  documentation describe the implemented behavior.
+
 **Purpose:** close the remaining gaps in the inventory-reservation assignment
 without changing unrelated models or combining independent milestones.
 
