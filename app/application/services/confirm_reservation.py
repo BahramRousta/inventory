@@ -7,6 +7,10 @@ from app.application.errors import (
     ReservationNotFound,
     ReservationStateConflict,
 )
+from app.application.ports.provider_gateway import (
+    InMemoryProviderGatewayRegistry,
+    ProviderGatewayRegistry,
+)
 from app.application.ports.repositories import UnitOfWork
 from app.application.services.finalize_reservation import finalize_confirming_reservation
 from app.domain.enums import ReservationLineStatus, ReservationStatus
@@ -26,8 +30,14 @@ class ConfirmReservationService:
     same application finalizer used by payment-success handling.
     """
 
-    def __init__(self, *, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        *,
+        uow_factory: Callable[[], UnitOfWork],
+        provider_gateways: ProviderGatewayRegistry | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
     async def execute(
         self, reservation_id: UUID, *, user_id: str
@@ -66,6 +76,7 @@ class ConfirmReservationService:
                 uow,
                 reservation_id=reservation_id,
                 user_id=user_id,
+                provider_gateways=self._provider_gateways,
             )
             await uow.commit()
 
