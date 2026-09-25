@@ -832,3 +832,100 @@ async def test_payment_failure_while_hold_unknown_reconciles_then_releases_real_
         provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
     assert provider_state.status_code == 200
     assert provider_state.json()["status"] == "RELEASED"
+
+
+async def test_release_timeout_after_remote_side_effect_reconciles_before_terminal_cancel(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-RELEASE-UNKNOWN",
+    )
+    registry = _registry(source.provider_id, fake_provider_url, timeout=0.05)
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="release-unknown-create"),
+            json=create_body(source),
+        )
+    assert created.status_code == 202
+
+    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    hold_key = f"{work.reservation_id}:{source.source_id}:HOLD"
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        cancelled = await client.post(
+            f"/reservations/{work.reservation_id}/cancel",
+            headers=create_headers(user_id="user-1"),
+        )
+    assert cancelled.status_code == 202
+
+    await ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute(work.reservation_id)
+
+    async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
+        releases = await uow.reservations.claim_pending_external_releases(
+            limit=10,
+            lease_seconds=30,
+        )
+        await uow.commit()
+    assert len(releases) == 1
+
+    await _set_provider_mode(fake_provider_url, "timeout_after_side_effect")
+    persisted = await ProcessClaimedProviderReleaseService(
+        uow_factory=uow_factory(postgres_session_factory),
+        provider_gateways=registry,
+    ).execute(releases[0])
+    assert persisted is True
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.RELEASE_UNKNOWN
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
+    assert provider_state.status_code == 200
+    assert provider_state.json()["status"] == "RELEASED"
+
+    await _set_provider_mode(fake_provider_url, "success")
+    async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
+        unknown_releases = await uow.reservations.claim_unknown_external_releases(
+            limit=10,
+            lease_seconds=30,
+        )
+        await uow.commit()
+    assert len(unknown_releases) == 1
+
+    reconciled = await ReconcileProviderWorkService(
+        uow_factory=uow_factory(postgres_session_factory),
+        provider_gateways=registry,
+    ).reconcile_release(unknown_releases[0])
+    assert reconciled is True
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.RELEASED
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CANCELLED
+    assert reservation.release_reason == "USER_CANCELLED"
