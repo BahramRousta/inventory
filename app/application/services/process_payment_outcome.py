@@ -9,10 +9,6 @@ from app.application.errors import (
     ReservationNotFound,
     ReservationStateConflict,
 )
-from app.application.ports.provider_gateway import (
-    ProviderGatewayRegistry,
-    ProviderRegistry,
-)
 from app.application.ports.repositories import UnitOfWork
 from app.application.services.finalize_reservation import finalize_confirming_reservation
 from app.domain.enums import PaymentOutcome, ReservationLineStatus, ReservationStatus
@@ -37,10 +33,8 @@ class ProcessPaymentOutcomeService:
         self,
         *,
         uow_factory: Callable[[], UnitOfWork],
-        provider_gateways: ProviderGatewayRegistry | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._provider_gateways = provider_gateways or ProviderRegistry()
 
     async def execute(self, command: PaymentOutcomeCommand) -> PaymentOutcomeResult:
         async with self._uow_factory() as uow:
@@ -68,7 +62,6 @@ class ProcessPaymentOutcomeService:
                         uow,
                         reservation_id=command.reservation_id,
                         user_id=command.user_id,
-                        provider_gateways=self._provider_gateways,
                     )
                     await uow.commit()
                 else:
