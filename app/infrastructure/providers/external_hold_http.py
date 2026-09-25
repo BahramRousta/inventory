@@ -6,7 +6,6 @@ from uuid import UUID
 import httpx
 
 from app.application.ports.provider_gateway import (
-    ProviderCapabilities,
     ProviderGateway,
     ProviderHoldOutcome,
     ProviderHoldResult,
@@ -15,16 +14,11 @@ from app.application.ports.provider_gateway import (
     ProviderReleaseOutcome,
     ProviderReleaseResult,
 )
+from app.infrastructure.providers.config import EXTERNAL_HOLD_HTTP_CAPABILITIES
 
 
 class ExternalHoldHttpGateway(ProviderGateway):
-    capabilities = ProviderCapabilities(
-        supports_check=False,
-        supports_hold=True,
-        supports_release=True,
-        supports_get_hold=True,
-        hold_is_final_allocation=True,
-    )
+    capabilities = EXTERNAL_HOLD_HTTP_CAPABILITIES
     """Adapter for the assignment's hold-capable HTTP provider contract.
 
     The configured provider accepts ``POST /holds`` with an idempotency key.
