@@ -465,6 +465,7 @@ async def test_cancel_internal_reservation_releases_stock_and_finishes_cancelled
         )
 
     assert cancelled.status_code == 202
+    assert cancelled.headers["retry-after"] == "1"
     assert cancelled.json()["status"] == "RELEASING"
 
     async with postgres_session_factory() as session:
@@ -1039,6 +1040,14 @@ async def test_repeated_cancel_does_not_release_internal_stock_twice(
     )
     await service.execute(reservation_id)
     await service.execute(reservation_id)
+
+    async with api_client(postgres_session_factory) as client:
+        settled_replay = await client.post(
+            f"/reservations/{reservation_id}/cancel",
+            headers=create_headers(user_id="user-1"),
+        )
+    assert settled_replay.status_code == 200
+    assert settled_replay.json()["status"] == "CANCELLED"
 
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, reservation_id)
