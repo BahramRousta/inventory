@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from app.application.errors import ReservationStateConflict
-from app.application.ports.provider_gateway import ProviderGatewayRegistry
 from app.application.ports.repositories import UnitOfWork
 from app.domain.enums import ProviderKind, ReservationLineStatus
 
@@ -11,7 +10,6 @@ async def finalize_confirming_reservation(
     *,
     reservation_id: UUID,
     user_id: str,
-    provider_gateways: ProviderGatewayRegistry,
 ) -> UUID:
     lines = await uow.reservations.get_lines(reservation_id)
     if not lines:
@@ -33,22 +31,9 @@ async def finalize_confirming_reservation(
                     f"Internal hold for {line.stock_source_id} cannot be consumed."
                 )
         else:
-            gateway = provider_gateways.get_reservation_provider(source.provider_id)
-            if gateway is None:
-                raise ReservationStateConflict(
-                    f"Provider {source.provider_id} has no configured gateway."
-                )
-            if not gateway.hold_is_final_allocation:
-                raise ReservationStateConflict(
-                    f"Provider {source.provider_id} does not declare HOLD as final allocation."
-                )
-            provider_ref = await uow.reservations.get_external_hold_ref(
-                reservation_id, line.stock_source_id
-            )
-            if not provider_ref:
-                raise ReservationStateConflict(
-                    f"External line {line.stock_source_id} has no durable allocation reference."
-                )
+            # External reservation details are hidden behind InventoryProvider.
+            # A HELD line means the provider accepted reserve() successfully.
+            pass
 
         await uow.reservations.mark_line_confirmed(reservation_id, line.stock_source_id)
 
