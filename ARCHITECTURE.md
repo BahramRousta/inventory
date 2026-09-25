@@ -44,15 +44,15 @@ The assignment demo chooses this explicit provider contract:
 
 **A successful HOLD is the final external allocation.**
 
-There is no remote CONFIRM operation. The application asks the registry for a
-`ReservationProviderGateway`. Query-only providers implement the separate
-`AvailabilityProviderGateway` interface and therefore cannot be selected for
-reservation work.
+The application owns one provider port: `InventoryProvider`. The worker loads
+a provider by ID and calls `reserve(...)`; the concrete provider decides how
+that operation is implemented. A query-style provider may check availability,
+while a reservation-style provider may perform a HOLD. The application service
+does not branch on those provider details.
 
-The reservation gateway contract consists of HOLD, RELEASE, and GET_HOLD plus
-the explicit `hold_is_final_allocation` semantic. The interview implementation
-uses a configurable mock gateway that returns deterministic results; a real
-HTTP adapter is intentionally not implemented.
+The same provider abstraction also exposes release/status operations needed by
+compensation and reconciliation. The interview implementation uses simple mock
+providers rather than real HTTP integrations.
 
 ## Payment and confirmation
 
