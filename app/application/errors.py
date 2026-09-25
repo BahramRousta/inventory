@@ -32,3 +32,15 @@ class IdempotencyConflict(ApplicationError):
 
 class PersistenceConflict(Exception):
     """Infrastructure translated a storage conflict that the application can recover from."""
+
+
+class ReservationNotFound(ApplicationError):
+    code = "RESERVATION_NOT_FOUND"
+
+
+class ReservationStateConflict(ApplicationError):
+    code = "RESERVATION_STATE_CONFLICT"
+
+
+class ReservationExpired(ApplicationError):
+    code = "RESERVATION_EXPIRED"

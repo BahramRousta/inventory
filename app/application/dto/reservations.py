@@ -97,3 +97,13 @@ class CreateReservationResult:
     expires_at: datetime
     payment_allowed: bool
     lines: tuple[ReservationLineResult, ...]
+
+
+@dataclass(frozen=True)
+class ConfirmReservationResult:
+    reservation_id: UUID
+    order_id: UUID
+    status: ReservationStatus
+    expires_at: datetime
+    payment_allowed: bool
+    lines: tuple[ReservationLineResult, ...]

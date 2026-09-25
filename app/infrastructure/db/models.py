@@ -154,3 +154,16 @@ class ReservationLineModel(Base):
             "provider_lease_until",
         ),
     )
+
+
+class OrderModel(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("reservations.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    user_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )

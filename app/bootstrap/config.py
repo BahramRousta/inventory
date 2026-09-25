@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     external_provider_id: UUID | None = None
     external_provider_base_url: str | None = None
     external_provider_hold_timeout_seconds: float = 5.0
+    in_memory_provider_ids: str = ""
     provider_worker_poll_interval_seconds: float = Field(default=1.0, gt=0)
     provider_worker_batch_size: int = Field(default=500, gt=0, le=1_000)
     provider_worker_lease_seconds: int = Field(default=60, gt=0, le=3_600)

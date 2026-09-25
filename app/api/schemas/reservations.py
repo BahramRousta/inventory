@@ -25,12 +25,20 @@ class ReservationLineResponse(BaseModel):
     status: ReservationLineStatus
 
 
-class CreateReservationResponse(BaseModel):
+class ReservationResponse(BaseModel):
     reservation_id: UUID
     status: ReservationStatus
     expires_at: datetime
     payment_allowed: bool
     lines: list[ReservationLineResponse]
+
+
+class CreateReservationResponse(ReservationResponse):
+    pass
+
+
+class ConfirmReservationResponse(ReservationResponse):
+    order_id: UUID
 
 
 class ErrorResponse(BaseModel):
