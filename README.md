@@ -13,9 +13,9 @@ during checkout.
 - required `Idempotency-Key` request header with body fingerprint checking;
 - trusted payment-outcome orchestration;
 - final order creation linked to the reservation;
-- provider capabilities declared by adapters and runtime configuration injected from environment;
-- standalone fake HTTP provider with success, decline and
-  timeout-after-side-effect scenarios;
+- capability-specific provider ports: query-only providers are distinct from
+  reservation-capable providers;
+- simple configurable mock provider outcomes for interview/demo scenarios;
 - independent hold, release, reconciliation and expiry worker processes.
 
 The configured demo provider uses **HOLD is final allocation** semantics. There
@@ -27,13 +27,13 @@ is no remote provider-confirm call.
 docker compose up --build
 ```
 
-Then seed products, sources, internal stock and the configured fake provider:
+Then seed products, sources, internal stock and the configured mock provider identity:
 
 ```bash
 docker compose exec api python scripts/seed_demo.py
 ```
 
-The API is on port 8000 and the fake provider is on port 9000.
+The API is on port 8000. Provider behavior is mocked in-process for this interview assignment.
 
 The seeded external provider ID is:
 
@@ -41,10 +41,10 @@ The seeded external provider ID is:
 11111111-1111-1111-1111-111111111111
 ```
 
-Compose configures every provider worker with that same ID and with
-`http://fake-provider:9000`. Provider endpoints, credentials, and timeouts are
-environment-backed settings; provider operation capabilities are declared by
-the adapter implementation, not stored in PostgreSQL.
+Compose configures every provider worker with that same provider ID. The
+factory selects a reservation-capable mock gateway for that ID. Query-only
+providers use a separate availability interface and cannot enter the
+reservation workflow.
 
 ## Create a reservation
 
@@ -121,37 +121,22 @@ Cancellation is asynchronous when external releases are required.
 `POST /reservations/{id}/confirm` remains only as a deprecated administrative
 compatibility endpoint. Checkout should use the payment-outcome endpoint.
 
-## Fake provider scenarios
+## Mock provider scenarios
 
-The fake provider begins in `success` mode.
+The assignment provider is intentionally simple. Set `MOCK_PROVIDER_MODE` to:
 
-Definitive decline:
+- `success`: HOLD and RELEASE succeed;
+- `decline`: HOLD is definitively declined;
+- `unknown`: HOLD/RELEASE/status lookup return ambiguous outcomes.
 
-```bash
-curl -X POST http://localhost:9000/admin/mode/decline
-```
-
-Timeout after the provider has already applied a HOLD or RELEASE side effect:
-
-```bash
-curl -X POST http://localhost:9000/admin/mode/timeout_after_side_effect
-```
-
-The latter intentionally creates an ambiguous local result; reconciliation
-later discovers whether the provider-side hold still exists through GET_HOLD.
-
-Restore normal behavior:
-
-```bash
-curl -X POST http://localhost:9000/admin/mode/success
-```
+The PostgreSQL E2E tests also configure the mock object directly to demonstrate
+reconciliation transitions without building a production HTTP integration.
 
 ## Processes
 
 Compose runs:
 
 - API;
-- fake HTTP provider;
 - HOLD worker;
 - RELEASE worker;
 - reconciliation worker;
@@ -160,10 +145,9 @@ Compose runs:
 - PostgreSQL.
 
 Worker batch size, concurrency, lease length and polling interval are
-configuration values. Provider runtime configuration is supplied with
-`EXTERNAL_PROVIDER_ID`, `EXTERNAL_PROVIDER_BASE_URL`,
-`EXTERNAL_PROVIDER_API_KEY` (when required), and timeout settings. CI/CD or a
-secret manager should inject secret values. Defaults are documented in
+configuration values. Provider selection for the demo uses `EXTERNAL_PROVIDER_ID` and
+`MOCK_PROVIDER_MODE`. Real endpoint/authentication configuration is
+deliberately outside this interview implementation. Defaults are documented in
 `SCALABILITY.md`.
 
 ## Design documents
@@ -177,8 +161,8 @@ secret manager should inject secret values. Defaults are documented in
 ## Verification
 
 The Step 9 suite is PostgreSQL-backed and asserts persisted database state in
-every E2E/API scenario. Provider behavior that matters to the assignment uses
-the standalone fake HTTP provider process rather than an in-memory mock.
+every E2E/API scenario. Provider behavior is exercised through deterministic mock gateways while all
+reservation and worker state is asserted against real PostgreSQL.
 
 Start a disposable PostgreSQL instance (the Compose `db` service is enough),
 then run:
@@ -194,6 +178,6 @@ The E2E fixture creates and drops the schema for each test, so
 Coverage includes API create/read/cancel/payment/direct-confirm behavior,
 idempotency and changed-body conflict, duplicate-line canonicalization,
 insufficient stock rollback, owner checks, expiry, immutable reservation lines,
-final-unit concurrency, provider HOLD success/decline/timeout-after-side-effect,
+final-unit concurrency, provider HOLD success/decline/unknown outcomes,
 reconciliation, provider RELEASE, mixed-source compensation, SKIP LOCKED work
 claims, stale-lease recovery, and payment/expiry transition coordination.
