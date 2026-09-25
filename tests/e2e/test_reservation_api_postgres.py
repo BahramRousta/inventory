@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, update
 
+from app.application.ports.provider_gateway import ProviderCapabilities
 from app.application.services.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
@@ -31,6 +32,7 @@ from tests.e2e.support import (
     create_headers,
     reservation_count,
     reservation_line_count,
+    registry_with_capabilities,
     seed_external_source,
     seed_internal_source,
     uow_factory,
@@ -343,13 +345,22 @@ async def test_external_provider_without_required_capabilities_is_rejected(
     source = await seed_external_source(
         postgres_session_factory,
         sku="QUERY-ONLY",
-        supports_hold=False,
-        supports_release=False,
-        supports_get_hold=False,
-        hold_is_final_allocation=False,
+    )
+    registry = registry_with_capabilities(
+        source.provider_id,
+        ProviderCapabilities(
+            supports_check=True,
+            supports_hold=False,
+            supports_release=False,
+            supports_get_hold=False,
+            hold_is_final_allocation=False,
+        ),
     )
 
-    async with api_client(postgres_session_factory) as client:
+    async with api_client(
+        postgres_session_factory,
+        provider_gateways=registry,
+    ) as client:
         response = await client.post(
             "/reservations",
             headers=create_headers(idempotency_key="unsupported-external"),
