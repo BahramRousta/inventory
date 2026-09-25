@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
     InMemoryProviderGatewayRegistry,
+    ProviderCapabilities,
     ProviderGatewayRegistry,
 )
 from app.application.services.cancel_reservation import CancelReservationService
@@ -61,12 +62,6 @@ async def seed_internal_source(
                 name=f"{sku}-provider",
                 kind=ProviderKind.INTERNAL,
                 enabled=provider_enabled,
-                supports_check=True,
-                supports_hold=True,
-                supports_release=True,
-                supports_get_hold=True,
-                hold_is_final_allocation=True,
-                config_key="internal-test",
             )
         )
         session.add(
@@ -95,10 +90,6 @@ async def seed_external_source(
     provider_id: UUID | None = None,
     provider_enabled: bool = True,
     source_enabled: bool = True,
-    supports_hold: bool = True,
-    supports_release: bool = True,
-    supports_get_hold: bool = True,
-    hold_is_final_allocation: bool = True,
 ) -> SeededSource:
     product_id = uuid4()
     provider_id = provider_id or uuid4()
@@ -111,13 +102,6 @@ async def seed_external_source(
                 name=f"{sku}-provider",
                 kind=ProviderKind.EXTERNAL,
                 enabled=provider_enabled,
-                supports_check=True,
-                supports_hold=supports_hold,
-                supports_release=supports_release,
-                supports_get_hold=supports_get_hold,
-                hold_is_final_allocation=hold_is_final_allocation,
-                config_key="fake-http-test",
-                credential_ref="secret://fake-provider/test",
             )
         )
         session.add(
@@ -158,10 +142,12 @@ def install_api_overrides(
         uow_factory=make_uow
     )
     app.dependency_overrides[get_confirm_reservation_service] = lambda: ConfirmReservationService(
-        uow_factory=make_uow
+        uow_factory=make_uow,
+        provider_gateways=registry,
     )
     app.dependency_overrides[get_payment_outcome_service] = lambda: ProcessPaymentOutcomeService(
-        uow_factory=make_uow
+        uow_factory=make_uow,
+        provider_gateways=registry,
     )
 
 
@@ -224,3 +210,28 @@ async def reservation_line_count(factory) -> int:
             await session.scalar(select(func.count()).select_from(ReservationLineModel))
             or 0
         )
+
+
+class CapabilityOnlyGateway:
+    """Test double used only to verify adapter-declared capability gating."""
+
+    def __init__(self, capabilities: ProviderCapabilities) -> None:
+        self.capabilities = capabilities
+
+    async def hold(self, **kwargs):
+        raise AssertionError("capability-only gateway must not be called")
+
+    async def release(self, **kwargs):
+        raise AssertionError("capability-only gateway must not be called")
+
+    async def get_hold(self, **kwargs):
+        raise AssertionError("capability-only gateway must not be called")
+
+
+def registry_with_capabilities(
+    provider_id: UUID,
+    capabilities: ProviderCapabilities,
+) -> InMemoryProviderGatewayRegistry:
+    return InMemoryProviderGatewayRegistry(
+        {provider_id: CapabilityOnlyGateway(capabilities)}
+    )
