@@ -52,7 +52,7 @@ class ProcessPendingProviderHoldService:
     ) -> ProviderReserveResult:
         if provider is None:
             return ProviderReserveResult(
-                outcome=ProviderReserveOutcome.UNKNOWN,
+                outcome=ProviderReserveOutcome.DECLINED,
                 error_code="PROVIDER_NOT_CONFIGURED",
             )
 
