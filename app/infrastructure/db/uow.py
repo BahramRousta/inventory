@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.infrastructure.db.repositories.inventory import SqlAlchemyInternalInventoryRepository
 from app.infrastructure.db.repositories.orders import SqlAlchemyOrderRepository
+from app.infrastructure.db.repositories.payment_events import SqlAlchemyPaymentEventRepository
 from app.infrastructure.db.repositories.reservation_lifecycle import (
     SqlAlchemyLifecycleReservationRepository,
 )
@@ -19,6 +20,7 @@ class SqlAlchemyUnitOfWork:
         self.reservations = SqlAlchemyLifecycleReservationRepository(self.session)
         self.inventory = SqlAlchemyInternalInventoryRepository(self.session)
         self.orders = SqlAlchemyOrderRepository(self.session)
+        self.payment_events = SqlAlchemyPaymentEventRepository(self.session)
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
