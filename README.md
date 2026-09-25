@@ -168,8 +168,26 @@ configuration values. Defaults are documented in `SCALABILITY.md`.
 - `SCALABILITY.md`
 - `REMEDIATION_WORKFLOW.md`
 
-## Verification status
+## Verification
 
-Automated end-to-end verification described in remediation Step 9 is
-intentionally **not added or run in this branch**, per the explicit instruction
-for this implementation pass.
+The Step 9 suite is PostgreSQL-backed and asserts persisted database state in
+every E2E/API scenario. Provider behavior that matters to the assignment uses
+the standalone fake HTTP provider process rather than an in-memory mock.
+
+Start a disposable PostgreSQL instance (the Compose `db` service is enough),
+then run:
+
+```bash
+export TEST_DATABASE_URL=postgresql+psycopg://reservation:reservation@127.0.0.1:5454/reservation
+pytest -m postgres tests/e2e tests/integration
+```
+
+The E2E fixture creates and drops the schema for each test, so
+`TEST_DATABASE_URL` **must point to a disposable test database**.
+
+Coverage includes API create/read/cancel/payment/direct-confirm behavior,
+idempotency and changed-body conflict, duplicate-line canonicalization,
+insufficient stock rollback, owner checks, expiry, immutable order lines,
+final-unit concurrency, provider HOLD success/decline/timeout-after-side-effect,
+reconciliation, provider RELEASE, mixed-source compensation, SKIP LOCKED work
+claims, stale-lease recovery, and payment/expiry transition coordination.
