@@ -17,7 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
-from app.domain.enums import ProviderKind, ReservationLineStatus, ReservationStatus
+from app.domain.enums import PaymentOutcome, ProviderKind, ReservationLineStatus, ReservationStatus
 
 
 def utcnow() -> datetime:
@@ -45,6 +45,16 @@ class InventoryProviderModel(Base):
         Enum(ProviderKind, native_enum=False, length=32), nullable=False
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    supports_check: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_release: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_get_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    hold_is_final_allocation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    config_key: Mapped[str | None] = mapped_column(String(160))
+    credential_ref: Mapped[str | None] = mapped_column(String(255))
 
 
 class StockSourceModel(Base):
@@ -89,6 +99,7 @@ class ReservationModel(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(160), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[ReservationStatus] = mapped_column(
         Enum(ReservationStatus, native_enum=False, length=32), nullable=False
     )
@@ -124,36 +135,39 @@ class ReservationLineModel(Base):
     status: Mapped[ReservationLineStatus] = mapped_column(
         Enum(ReservationLineStatus, native_enum=False, length=32), nullable=False
     )
-
-    # Provider-specific hold identifier. NULL for internal inventory lines.
     external_hold_ref: Mapped[str | None] = mapped_column(String(255))
-
-    # Durable worker claim metadata. The token makes completion writes
-    # compare-and-set; the lease makes a crashed worker's ambiguity recoverable.
     provider_claim_token: Mapped[UUID | None] = mapped_column(Uuid)
-    provider_lease_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-
+    provider_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     held_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        CheckConstraint(
-            "quantity > 0", name="ck_reservation_line_quantity_positive"
-        ),
+        CheckConstraint("quantity > 0", name="ck_reservation_line_quantity_positive"),
         UniqueConstraint(
-            "reservation_id",
-            "stock_source_id",
-            name="uq_reservation_line_source",
+            "reservation_id", "stock_source_id", name="uq_reservation_line_source"
         ),
-        Index(
-            "ix_reservation_line_work_claim",
-            "status",
-            "provider_lease_until",
-        ),
+        Index("ix_reservation_line_work_claim", "status", "provider_lease_until"),
     )
+
+
+class PaymentEventModel(Base):
+    __tablename__ = "payment_events"
+
+    event_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("reservations.id", ondelete="RESTRICT"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    outcome: Mapped[PaymentOutcome] = mapped_column(
+        Enum(PaymentOutcome, native_enum=False, length=16), nullable=False
+    )
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    __table_args__ = (Index("ix_payment_event_reservation", "reservation_id"),)
 
 
 class OrderModel(Base):
@@ -166,4 +180,29 @@ class OrderModel(Base):
     user_id: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
+class OrderLineModel(Base):
+    __tablename__ = "order_lines"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    order_id: Mapped[UUID] = mapped_column(
+        ForeignKey("orders.id", ondelete="RESTRICT"), nullable=False
+    )
+    product_id: Mapped[UUID] = mapped_column(
+        ForeignKey("products.id", ondelete="RESTRICT"), nullable=False
+    )
+    stock_source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("stock_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    provider_id: Mapped[UUID] = mapped_column(
+        ForeignKey("inventory_providers.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_allocation_ref: Mapped[str | None] = mapped_column(String(255))
+
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_order_line_quantity_positive"),
+        UniqueConstraint("order_id", "stock_source_id", name="uq_order_line_source"),
     )
