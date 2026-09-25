@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import case, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.dto.reservations import ReservationIdentityRecord
@@ -144,7 +144,15 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
                 ReservationModel.status == ReservationStatus.RELEASING,
                 ~has_unresolved_line,
             )
-            .values(status=ReservationStatus.CANCELLED)
+            .values(
+                status=case(
+                    (
+                        ReservationModel.release_reason == "EXPIRED",
+                        ReservationStatus.EXPIRED,
+                    ),
+                    else_=ReservationStatus.CANCELLED,
+                )
+            )
         )
         await self._session.flush()
         return result.rowcount == 1
