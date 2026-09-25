@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
+    ProviderRegistry,
     ProviderReservationLookupOutcome,
     ProviderReserveOutcome,
     ProviderReleaseOutcome,
@@ -502,3 +503,88 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
     assert line.external_hold_ref == (
         f"query:{work.reservation_id}:{source.source_id}:RESERVE"
     )
+
+
+async def test_query_provider_declines_when_availability_is_insufficient(
+    postgres_session_factory,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-QUERY-INSUFFICIENT",
+    )
+    provider = MockAvailabilityProvider(available_quantity=1)
+    registry = provider_registry(source.provider_id, provider)
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="query-insufficient"),
+            json=create_body(source, quantity=2),
+        )
+
+    assert created.status_code == 202
+
+    work = await _claim_and_process_reservation(
+        postgres_session_factory,
+        registry,
+    )
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(
+            ReservationModel,
+            work.reservation_id,
+        )
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id
+                == work.reservation_id
+            )
+        )
+
+    assert provider.reserve_calls == 1
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+    assert reservation.release_reason == "CREATE_FAILED"
+    assert line is not None
+    assert line.status == ReservationLineStatus.FAILED
+
+
+async def test_missing_provider_is_rejected_during_provider_processing(
+    postgres_session_factory,
+):
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-NO-PROVIDER",
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="missing-provider"),
+            json=create_body(source),
+        )
+
+    assert created.status_code == 202
+
+    work = await _claim_and_process_reservation(
+        postgres_session_factory,
+        ProviderRegistry(),
+    )
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(
+            ReservationModel,
+            work.reservation_id,
+        )
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id
+                == work.reservation_id
+            )
+        )
+
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+    assert reservation.release_reason == "CREATE_FAILED"
+    assert line is not None
+    assert line.status == ReservationLineStatus.FAILED
