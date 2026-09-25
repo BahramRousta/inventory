@@ -14,12 +14,10 @@ from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
 from app.application.services.get_reservation import GetReservationService
-from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
 from app.bootstrap.dependencies import (
     get_cancel_reservation_service,
     get_confirm_reservation_service,
     get_create_reservation_service,
-    get_payment_outcome_service,
     get_reservation_service,
 )
 from app.infrastructure.clock import SystemClock
@@ -137,9 +135,6 @@ def install_api_overrides(
         uow_factory=make_uow
     )
     app.dependency_overrides[get_confirm_reservation_service] = lambda: ConfirmReservationService(
-        uow_factory=make_uow,
-    )
-    app.dependency_overrides[get_payment_outcome_service] = lambda: ProcessPaymentOutcomeService(
         uow_factory=make_uow,
     )
 
