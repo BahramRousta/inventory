@@ -72,6 +72,12 @@ class ProcessPaymentOutcomeService:
                     if not await uow.reservations.begin_confirming_if_active(
                         command.reservation_id
                     ):
+                        duplicate = await uow.payment_events.get(command.event_id)
+                        if duplicate is not None:
+                            _assert_same_event(duplicate, payload_hash)
+                            return await _snapshot_from_uow(
+                                uow, command.reservation_id, command.user_id
+                            )
                         raise ReservationStateConflict(
                             "Payment success lost the race with expiry or another transition."
                         )
@@ -100,6 +106,12 @@ class ProcessPaymentOutcomeService:
                     if not await uow.reservations.begin_releasing(
                         command.reservation_id, "PAYMENT_FAILED"
                     ):
+                        duplicate = await uow.payment_events.get(command.event_id)
+                        if duplicate is not None:
+                            _assert_same_event(duplicate, payload_hash)
+                            return await _snapshot_from_uow(
+                                uow, command.reservation_id, command.user_id
+                            )
                         raise ReservationStateConflict(
                             "Payment failure lost the race with another transition."
                         )
