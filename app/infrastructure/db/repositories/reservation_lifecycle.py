@@ -106,33 +106,6 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
         await self._session.flush()
         return result.rowcount == 1
 
-    async def claim_next_expired_reserving_reservation(self) -> UUID | None:
-        reservation_id = await self._session.scalar(
-            select(ReservationModel.id)
-            .where(
-                ReservationModel.status.in_(
-                    (ReservationStatus.RESERVING, ReservationStatus.ACTIVE)
-                ),
-                ReservationModel.expires_at <= func.now(),
-            )
-            .order_by(ReservationModel.expires_at, ReservationModel.id)
-            .limit(1)
-        )
-        if reservation_id is None:
-            return None
-        return await self._session.scalar(
-            update(ReservationModel)
-            .where(
-                ReservationModel.id == reservation_id,
-                ReservationModel.status.in_(
-                    (ReservationStatus.RESERVING, ReservationStatus.ACTIVE)
-                ),
-                ReservationModel.expires_at <= func.now(),
-            )
-            .values(status=ReservationStatus.RELEASING, release_reason="EXPIRED")
-            .returning(ReservationModel.id)
-        )
-
     async def cancel_if_all_lines_resolved(self, reservation_id: UUID) -> bool:
         has_unresolved_line = exists(
             select(1).where(

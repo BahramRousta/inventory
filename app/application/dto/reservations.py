@@ -61,21 +61,6 @@ class ReservationLineResult:
 
 
 @dataclass(frozen=True)
-class ExternalReleaseRecord:
-    stock_source_id: UUID
-    external_hold_ref: str
-
-
-@dataclass(frozen=True)
-class PendingExternalHoldRecord:
-    reservation_id: UUID
-    stock_source_id: UUID
-    provider_id: UUID
-    quantity: int
-    expires_at: datetime
-
-
-@dataclass(frozen=True)
 class ClaimedExternalHoldRecord:
     reservation_id: UUID
     stock_source_id: UUID
@@ -92,14 +77,6 @@ class ClaimedExternalReleaseRecord:
     provider_id: UUID
     external_hold_ref: str
     claim_token: UUID
-
-
-@dataclass(frozen=True)
-class PendingExternalReleaseRecord:
-    reservation_id: UUID
-    stock_source_id: UUID
-    provider_id: UUID
-    external_hold_ref: str
 
 
 @dataclass(frozen=True)
