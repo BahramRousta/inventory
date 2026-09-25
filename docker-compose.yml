@@ -15,19 +15,123 @@ services:
     volumes:
       - reservation_pg:/var/lib/postgresql/data
 
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+    command: alembic upgrade head
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  fake-provider:
+    build: .
+    environment:
+      FAKE_PROVIDER_MODE: success
+      FAKE_PROVIDER_TIMEOUT_SECONDS: 5
+    command: uvicorn app.fake_provider:app --host 0.0.0.0 --port 9000
+    volumes:
+      - .:/app
+    ports:
+      - "9000:9000"
+
   api:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
       RESERVATION_TTL_SECONDS: 900
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
+      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
+      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
+      PROVIDER_WORKER_BATCH_SIZE: 500
+      PROVIDER_WORKER_LEASE_SECONDS: 60
+      PROVIDER_WORKER_CONCURRENCY: 5
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      fake-provider:
+        condition: service_started
+
+  hold-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+      EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
+      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
+      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
+      PROVIDER_WORKER_BATCH_SIZE: 500
+      PROVIDER_WORKER_LEASE_SECONDS: 60
+      PROVIDER_WORKER_CONCURRENCY: 5
+    command: python -m app.workers.hold_worker --forever
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      fake-provider:
+        condition: service_started
+
+  release-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+      EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
+      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
+      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
+      PROVIDER_WORKER_BATCH_SIZE: 500
+      PROVIDER_WORKER_LEASE_SECONDS: 60
+      PROVIDER_WORKER_CONCURRENCY: 5
+    command: python -m app.workers.release_worker --forever
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      fake-provider:
+        condition: service_started
+
+  reconciliation-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+      EXTERNAL_PROVIDER_ID: 11111111-1111-1111-1111-111111111111
+      EXTERNAL_PROVIDER_BASE_URL: http://fake-provider:9000
+      EXTERNAL_PROVIDER_HOLD_TIMEOUT_SECONDS: 2
+      PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
+      PROVIDER_WORKER_BATCH_SIZE: 500
+      PROVIDER_WORKER_LEASE_SECONDS: 60
+      PROVIDER_WORKER_CONCURRENCY: 5
+    command: python -m app.workers.reconciliation_worker --forever
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      fake-provider:
+        condition: service_started
+
+  expiry-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://reservation:reservation@db:5432/reservation
+      PROVIDER_WORKER_POLL_INTERVAL_SECONDS: 1
+      PROVIDER_WORKER_BATCH_SIZE: 500
+    command: python -m app.workers.expiry_worker --forever
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   reservation_pg:
