@@ -1137,3 +1137,95 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     assert stock is not None
     assert stock.held == 1
     assert order_count == 0
+
+
+async def test_multi_item_payment_success_creates_one_order_with_all_immutable_lines(
+    postgres_session_factory,
+):
+    first_source = await seed_internal_source(
+        postgres_session_factory, sku="MULTI-ORDER-A", on_hand=3
+    )
+    second_source = await seed_internal_source(
+        postgres_session_factory, sku="MULTI-ORDER-B", on_hand=4
+    )
+    event_id = uuid4()
+
+    body = {
+        "items": [
+            {
+                "product_id": str(first_source.product_id),
+                "stock_source_id": str(first_source.source_id),
+                "quantity": 2,
+            },
+            {
+                "product_id": str(second_source.product_id),
+                "stock_source_id": str(second_source.source_id),
+                "quantity": 1,
+            },
+        ]
+    }
+
+    async with api_client(postgres_session_factory) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="multi-order-create"),
+            json=body,
+        )
+        assert created.status_code == 201
+        reservation_id = UUID(created.json()["reservation_id"])
+        paid = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(event_id), "outcome": "SUCCESS"},
+        )
+
+    assert paid.status_code == 200
+    assert paid.json()["status"] == "CONFIRMED"
+    order_id = UUID(paid.json()["order_id"])
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        reservation_lines = (
+            await session.scalars(
+                select(ReservationLineModel).where(
+                    ReservationLineModel.reservation_id == reservation_id
+                )
+            )
+        ).all()
+        order_lines = (
+            await session.scalars(
+                select(OrderLineModel).where(OrderLineModel.order_id == order_id)
+            )
+        ).all()
+        first_stock = await session.get(
+            InternalStockModel, first_source.source_id
+        )
+        second_stock = await session.get(
+            InternalStockModel, second_source.source_id
+        )
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CONFIRMED
+    assert len(reservation_lines) == 2
+    assert all(
+        line.status == ReservationLineStatus.CONFIRMED
+        for line in reservation_lines
+    )
+    assert order_count == 1
+    assert len(order_lines) == 2
+    assert {
+        (line.product_id, line.stock_source_id, line.quantity)
+        for line in order_lines
+    } == {
+        (first_source.product_id, first_source.source_id, 2),
+        (second_source.product_id, second_source.source_id, 1),
+    }
+    assert first_stock is not None
+    assert first_stock.on_hand == 1
+    assert first_stock.held == 0
+    assert second_stock is not None
+    assert second_stock.on_hand == 3
+    assert second_stock.held == 0
