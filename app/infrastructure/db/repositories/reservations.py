@@ -489,7 +489,9 @@ class SqlAlchemyReservationRepository:
         reservation_id = await self._session.scalar(
             select(ReservationModel.id)
             .where(
-                ReservationModel.status == ReservationStatus.RESERVING,
+                ReservationModel.status.in_(
+                    (ReservationStatus.RESERVING, ReservationStatus.ACTIVE)
+                ),
                 ReservationModel.expires_at <= func.now(),
             )
             .order_by(ReservationModel.expires_at, ReservationModel.id)
@@ -643,7 +645,9 @@ class SqlAlchemyReservationRepository:
             await self._session.scalars(
                 select(ReservationModel.id)
                 .where(
-                    ReservationModel.status == ReservationStatus.RESERVING,
+                    ReservationModel.status.in_(
+                        (ReservationStatus.RESERVING, ReservationStatus.ACTIVE)
+                    ),
                     ReservationModel.expires_at <= func.now(),
                 )
                 .order_by(ReservationModel.expires_at, ReservationModel.id)
