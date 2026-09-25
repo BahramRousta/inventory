@@ -564,7 +564,7 @@ class SqlAlchemyReservationRepository:
                 )
                 .order_by(ReservationModel.created_at, ReservationLineModel.id)
                 .limit(limit)
-                .with_for_update(skip_locked=True)
+                .with_for_update(of=ReservationLineModel, skip_locked=True)
             )
         ).all()
 
@@ -802,7 +802,7 @@ class SqlAlchemyReservationRepository:
                 )
                 .order_by(ReservationLineModel.id)
                 .limit(limit)
-                .with_for_update(skip_locked=True)
+                .with_for_update(of=ReservationLineModel, skip_locked=True)
             )
         ).all()
         claimed = []
