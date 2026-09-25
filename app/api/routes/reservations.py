@@ -82,11 +82,11 @@ async def create_reservation(
     )
     response.headers["Location"] = f"/reservations/{result.reservation_id}"
 
-    if result.replayed:
-        response.status_code = status.HTTP_200_OK
-    elif result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}:
+    if result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}:
         response.status_code = status.HTTP_202_ACCEPTED
         response.headers["Retry-After"] = "1"
+    elif result.replayed:
+        response.status_code = status.HTTP_200_OK
     else:
         response.status_code = status.HTTP_201_CREATED
 
