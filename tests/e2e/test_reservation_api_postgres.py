@@ -889,3 +889,251 @@ async def test_confirmed_reservation_cannot_be_cancelled(
     assert stock is not None
     assert stock.held == 0
     assert stock.on_hand == 1
+
+
+async def test_invalid_quantity_validation_creates_no_database_state(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="INVALID-QTY", on_hand=5
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        response = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="invalid-qty"),
+            json={
+                "items": [
+                    {
+                        "product_id": str(source.product_id),
+                        "stock_source_id": str(source.source_id),
+                        "quantity": 0,
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert await reservation_count(postgres_session_factory) == 0
+
+    async with postgres_session_factory() as session:
+        stock = await session.get(InternalStockModel, source.source_id)
+    assert stock is not None
+    assert stock.held == 0
+
+
+async def test_duplicate_line_total_overflow_is_rejected_before_stock_mutation(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="OVERFLOW-QTY", on_hand=10
+    )
+    max_quantity = 2_147_483_647
+
+    async with api_client(postgres_session_factory) as client:
+        response = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="overflow-qty"),
+            json={
+                "items": [
+                    {
+                        "product_id": str(source.product_id),
+                        "stock_source_id": str(source.source_id),
+                        "quantity": max_quantity,
+                    },
+                    {
+                        "product_id": str(source.product_id),
+                        "stock_source_id": str(source.source_id),
+                        "quantity": 1,
+                    },
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_RESERVATION_ITEMS"
+    assert await reservation_count(postgres_session_factory) == 0
+
+    async with postgres_session_factory() as session:
+        stock = await session.get(InternalStockModel, source.source_id)
+    assert stock is not None
+    assert stock.held == 0
+
+
+async def test_get_unknown_reservation_returns_404_and_database_remains_empty(
+    postgres_session_factory,
+):
+    missing_id = uuid4()
+
+    async with api_client(postgres_session_factory) as client:
+        response = await client.get(
+            f"/reservations/{missing_id}",
+            headers=create_headers(user_id="user-1"),
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "RESERVATION_NOT_FOUND"
+    assert await reservation_count(postgres_session_factory) == 0
+
+    async with postgres_session_factory() as session:
+        line_count = await session.scalar(
+            select(func.count()).select_from(ReservationLineModel)
+        )
+    assert line_count == 0
+
+
+async def test_cancel_rejects_wrong_owner_without_changing_hold(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="CANCEL-WRONG-OWNER", on_hand=2
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await _create_internal(client, source, key="cancel-wrong-owner")
+        reservation_id = UUID(created.json()["reservation_id"])
+        response = await client.post(
+            f"/reservations/{reservation_id}/cancel",
+            headers=create_headers(user_id="other-user"),
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "RESERVATION_NOT_FOUND"
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        stock = await session.get(InternalStockModel, source.source_id)
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.ACTIVE
+    assert stock is not None
+    assert stock.held == 1
+
+
+async def test_repeated_cancel_does_not_release_internal_stock_twice(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="CANCEL-REPLAY", on_hand=2
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await _create_internal(client, source, key="cancel-replay-create")
+        reservation_id = UUID(created.json()["reservation_id"])
+        first = await client.post(
+            f"/reservations/{reservation_id}/cancel",
+            headers=create_headers(user_id="user-1"),
+        )
+        second = await client.post(
+            f"/reservations/{reservation_id}/cancel",
+            headers=create_headers(user_id="user-1"),
+        )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["status"] == "RELEASING"
+    assert second.json()["status"] == "RELEASING"
+
+    service = ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    )
+    await service.execute(reservation_id)
+    await service.execute(reservation_id)
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        stock = await session.get(InternalStockModel, source.source_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CANCELLED
+    assert stock is not None
+    assert stock.on_hand == 2
+    assert stock.held == 0
+    assert line is not None
+    assert line.status == ReservationLineStatus.RELEASED
+
+
+async def test_new_failure_event_after_success_is_rejected_as_contradictory(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="PAY-LATE-FAILURE", on_hand=2
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await _create_internal(client, source, key="late-failure-create")
+        reservation_id = UUID(created.json()["reservation_id"])
+        success_event = uuid4()
+        failure_event = uuid4()
+        success = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(success_event), "outcome": "SUCCESS"},
+        )
+        failure = await client.post(
+            f"/reservations/{reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(failure_event), "outcome": "FAILURE"},
+        )
+
+    assert success.status_code == 200
+    assert failure.status_code == 409
+    assert failure.json()["code"] == "RESERVATION_STATE_CONFLICT"
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        success_row = await session.get(PaymentEventModel, success_event)
+        failure_row = await session.get(PaymentEventModel, failure_event)
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CONFIRMED
+    assert success_row is not None
+    assert failure_row is None
+    assert order_count == 1
+
+
+async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
+    postgres_session_factory,
+):
+    source = await seed_internal_source(
+        postgres_session_factory, sku="CONFIRM-EXPIRED", on_hand=2
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        created = await _create_internal(client, source, key="confirm-expired-create")
+        reservation_id = UUID(created.json()["reservation_id"])
+
+        async with postgres_session_factory.begin() as session:
+            await session.execute(
+                update(ReservationModel)
+                .where(ReservationModel.id == reservation_id)
+                .values(
+                    expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
+                )
+            )
+
+        response = await client.post(
+            f"/reservations/{reservation_id}/confirm",
+            headers=create_headers(user_id="user-1"),
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "RESERVATION_EXPIRED"
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        stock = await session.get(InternalStockModel, source.source_id)
+        order_count = await session.scalar(
+            select(func.count()).select_from(OrderModel)
+        )
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.ACTIVE
+    assert stock is not None
+    assert stock.held == 1
+    assert order_count == 0
