@@ -1,18 +1,18 @@
 from app.application.ports.provider_gateway import ProviderRegistryProtocol
-from app.application.services.cancel_reservation import CancelReservationService
-from app.application.services.confirm_reservation import ConfirmReservationService
-from app.application.services.create_reservation import CreateReservationService
-from app.application.services.get_reservation import GetReservationService
-from app.application.services.process_claimed_provider_release import (
+from app.application.services.cancel.cancel_reservation import CancelReservationService
+from app.application.services.confirm.confirm_reservation import ConfirmReservationService
+from app.application.services.create.create_reservation import CreateReservationService
+from app.application.services.inquiry.get_reservation import GetReservationService
+from app.application.services.cancel.process_claimed_provider_release import (
     ProcessClaimedProviderReleaseService,
 )
-from app.application.services.process_pending_provider_hold import (
+from app.application.services.create.process_pending_provider_hold import (
     ProcessPendingProviderHoldService,
 )
-from app.application.services.process_releasing_reservation import (
+from app.application.services.cancel.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
-from app.application.services.reconcile_provider_work import ReconcileProviderWorkService
+from app.application.services.reconciliation.reconcile_provider_work import ReconcileProviderWorkService
 from app.bootstrap.config import get_settings
 from app.infrastructure.clock import SystemClock
 from app.infrastructure.db.session import AsyncSessionLocal
