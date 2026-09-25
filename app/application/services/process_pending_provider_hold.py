@@ -11,7 +11,7 @@ from app.domain.enums import ReservationLineStatus
 
 
 class ProcessPendingProviderHoldService:
-    """Processes one durable HOLD claim outside database transactions."""
+    """Processes one claimed external reservation line outside DB transactions."""
 
     def __init__(
         self,
@@ -23,10 +23,15 @@ class ProcessPendingProviderHoldService:
         self._providers = providers
 
     async def execute(self, work: ClaimedExternalHoldRecord) -> bool:
-        reservation_key = f"{work.reservation_id}:{work.stock_source_id}:RESERVE"
+        reservation_key = (
+            f"{work.reservation_id}:{work.stock_source_id}:RESERVE"
+        )
+
         async with self._uow_factory() as uow:
             if not await uow.reservations.is_external_hold_claim_owned(
-                work.reservation_id, work.stock_source_id, work.claim_token
+                work.reservation_id,
+                work.stock_source_id,
+                work.claim_token,
             ):
                 return False
 
@@ -50,6 +55,7 @@ class ProcessPendingProviderHoldService:
                 outcome=ProviderReserveOutcome.UNKNOWN,
                 error_code="PROVIDER_NOT_CONFIGURED",
             )
+
         try:
             return await provider.reserve(
                 stock_source_id=work.stock_source_id,
@@ -59,7 +65,7 @@ class ProcessPendingProviderHoldService:
             )
         except Exception:
             return ProviderReserveResult(
-                outcome=ProviderHoldOutcome.UNKNOWN,
+                outcome=ProviderReserveOutcome.UNKNOWN,
                 error_code="PROVIDER_RESERVE_EXCEPTION",
             )
 
@@ -73,6 +79,7 @@ class ProcessPendingProviderHoldService:
             ProviderReserveOutcome.DECLINED: ReservationLineStatus.FAILED,
             ProviderReserveOutcome.UNKNOWN: ReservationLineStatus.HOLD_UNKNOWN,
         }[result.outcome]
+
         async with self._uow_factory() as uow:
             persisted = await uow.reservations.record_external_hold_result(
                 reservation_id=work.reservation_id,
@@ -83,9 +90,15 @@ class ProcessPendingProviderHoldService:
             )
             if not persisted:
                 return False
+
             if line_status == ReservationLineStatus.HELD:
-                await uow.reservations.activate_if_all_lines_held(work.reservation_id)
+                await uow.reservations.activate_if_all_lines_held(
+                    work.reservation_id
+                )
             elif line_status == ReservationLineStatus.FAILED:
-                await uow.reservations.begin_releasing_if_reserving(work.reservation_id)
+                await uow.reservations.begin_releasing_if_reserving(
+                    work.reservation_id
+                )
+
             await uow.commit()
             return True
