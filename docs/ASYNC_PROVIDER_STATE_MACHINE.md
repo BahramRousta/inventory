@@ -2,8 +2,7 @@
 
 ## Contract
 
-Internal-only reservations remain synchronous. External provider calls are
-asynchronous and never run inside a PostgreSQL transaction.
+Internal-only reservations remain synchronous. External provider work is asynchronous and never runs inside a PostgreSQL transaction.
 
 Worker claims are durable reservation-line state. PostgreSQL row locks with
 `SKIP LOCKED`, claim tokens and lease deadlines prevent duplicate local work;
@@ -97,16 +96,15 @@ reservations into `RELEASING` with `release_reason=EXPIRED`. Compensation
 uses the normal release workflow. Once every line is resolved, the reservation
 becomes `EXPIRED`, not `CANCELLED`.
 
-## Fake provider scenarios
+## Mock provider scenarios
 
-The standalone fake provider supports these modes:
+The assignment uses `MockReservationProviderGateway` instead of a real remote
+provider adapter. Tests configure deterministic outcomes:
 
-- `success`: HOLD succeeds normally.
-- `decline`: HOLD returns a definitive 409 decline.
-- `timeout_after_side_effect`: a mutating provider call applies its HOLD or
-  RELEASE side effect and then delays the response beyond the client timeout.
-  Local state becomes `HOLD_UNKNOWN` or `RELEASE_UNKNOWN`; reconciliation
-  later proves the durable upstream state before any terminal claim is made.
+- HOLD -> `HELD`, `DECLINED`, or `UNKNOWN`;
+- RELEASE -> `RELEASED` or `UNKNOWN`;
+- GET_HOLD -> `HELD`, `NOT_HELD`, or `UNKNOWN`.
 
-The mode can be changed through the fake provider's
-`POST /admin/mode/{mode}` endpoint for demonstrations.
+This keeps the interview implementation focused on reservation orchestration,
+state transitions, compensation, and reconciliation rather than HTTP client
+plumbing.

@@ -82,7 +82,7 @@ class ReconcileProviderWorkService:
             return persisted
 
     async def _lookup(self, provider_id, hold_key: str) -> ProviderHoldLookupResult:
-        gateway = self._provider_gateways.get(provider_id)
+        gateway = self._provider_gateways.get_reservation_provider(provider_id)
         if gateway is None:
             return ProviderHoldLookupResult(ProviderHoldLookupOutcome.UNKNOWN)
         try:

@@ -1,4 +1,4 @@
-from app.application.ports.provider_gateway import InMemoryProviderGatewayRegistry
+from app.application.ports.provider_gateway import ProviderGatewayRegistry
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
@@ -25,7 +25,7 @@ def _uow_factory():
     return SqlAlchemyUnitOfWork(AsyncSessionLocal)
 
 
-def get_provider_gateway_registry() -> InMemoryProviderGatewayRegistry:
+def get_provider_gateway_registry() -> ProviderGatewayRegistry:
     return ProviderGatewayFactory(get_settings()).create_registry()
 
 

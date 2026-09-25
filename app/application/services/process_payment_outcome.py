@@ -10,8 +10,8 @@ from app.application.errors import (
     ReservationStateConflict,
 )
 from app.application.ports.provider_gateway import (
-    InMemoryProviderGatewayRegistry,
     ProviderGatewayRegistry,
+    ProviderRegistry,
 )
 from app.application.ports.repositories import UnitOfWork
 from app.application.services.finalize_reservation import finalize_confirming_reservation
@@ -40,7 +40,7 @@ class ProcessPaymentOutcomeService:
         provider_gateways: ProviderGatewayRegistry | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
+        self._provider_gateways = provider_gateways or ProviderRegistry()
 
     async def execute(self, command: PaymentOutcomeCommand) -> PaymentOutcomeResult:
         async with self._uow_factory() as uow:

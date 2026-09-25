@@ -8,8 +8,8 @@ from app.application.errors import (
     ReservationStateConflict,
 )
 from app.application.ports.provider_gateway import (
-    InMemoryProviderGatewayRegistry,
     ProviderGatewayRegistry,
+    ProviderRegistry,
 )
 from app.application.ports.repositories import UnitOfWork
 from app.application.services.finalize_reservation import finalize_confirming_reservation
@@ -37,7 +37,7 @@ class ConfirmReservationService:
         provider_gateways: ProviderGatewayRegistry | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
+        self._provider_gateways = provider_gateways or ProviderRegistry()
 
     async def execute(self, reservation_id: UUID, *, user_id: str) -> ConfirmReservationResult:
         async with self._uow_factory() as uow:

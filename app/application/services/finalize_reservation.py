@@ -33,12 +33,12 @@ async def finalize_confirming_reservation(
                     f"Internal hold for {line.stock_source_id} cannot be consumed."
                 )
         else:
-            gateway = provider_gateways.get(source.provider_id)
+            gateway = provider_gateways.get_reservation_provider(source.provider_id)
             if gateway is None:
                 raise ReservationStateConflict(
                     f"Provider {source.provider_id} has no configured gateway."
                 )
-            if not gateway.capabilities.hold_is_final_allocation:
+            if not gateway.hold_is_final_allocation:
                 raise ReservationStateConflict(
                     f"Provider {source.provider_id} does not declare HOLD as final allocation."
                 )

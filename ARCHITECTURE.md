@@ -17,12 +17,12 @@ The code uses ports and adapters around application services:
 - FastAPI routes translate HTTP requests into application commands.
 - Application services own reservation workflows and state transitions.
 - Repository and provider protocols are application-owned ports.
-- SQLAlchemy/PostgreSQL and HTTP provider clients are infrastructure adapters.
+- SQLAlchemy/PostgreSQL and provider gateways are infrastructure adapters.
 - A unit of work gives one transaction boundary for local state changes.
 - Independent workers claim external work from PostgreSQL using row locks and
   leases.
 
-Provider HTTP is never performed while a database transaction is held.
+Provider work is invoked outside database transactions; the interview implementation uses deterministic mock gateways at that boundary.
 
 ## Reservation creation
 
@@ -44,22 +44,15 @@ The assignment demo chooses this explicit provider contract:
 
 **A successful HOLD is the final external allocation.**
 
-There is no remote CONFIRM operation. The HTTP provider adapter declares this
-contract through `ProviderCapabilities.hold_is_final_allocation`, and the
-application checks the configured adapter before an external source can
-participate in a guaranteed reservation or be finalized after payment.
+There is no remote CONFIRM operation. The application asks the registry for a
+`ReservationProviderGateway`. Query-only providers implement the separate
+`AvailabilityProviderGateway` interface and therefore cannot be selected for
+reservation work.
 
-Provider operation capabilities belong to adapter code rather than provider
-rows in PostgreSQL. The configured gateway declares support for HOLD, RELEASE,
-GET_HOLD, and final-allocation semantics. A query-only or otherwise
-insufficient adapter is rejected before a reservation is created.
-
-Provider runtime configuration is environment-backed and assembled by
-`ProviderGatewayFactory`. Provider ID, base URL, timeout, and optional API key
-come from deployment settings/CI secret injection. Provider-specific
-authentication, request shapes, capabilities, and errors stay in
-infrastructure adapters; raw credentials are not persisted in this service's
-database.
+The reservation gateway contract consists of HOLD, RELEASE, and GET_HOLD plus
+the explicit `hold_is_final_allocation` semantic. The interview implementation
+uses a configurable mock gateway that returns deterministic results; a real
+HTTP adapter is intentionally not implemented.
 
 ## Payment and confirmation
 
@@ -118,7 +111,7 @@ For this interview assignment:
 
 - PostgreSQL is the only local source of truth; no Kafka, RabbitMQ, Celery or
   Redis is introduced.
-- Only one configured external HTTP provider is used in the runnable demo.
+- Only simple mock provider gateways are used in the runnable demo; real provider HTTP/auth details are deliberately out of scope.
 - Provider HOLD is the final external allocation, avoiding an undocumented
   remote CONFIRM protocol.
 - The final order is linked one-to-one with its confirmed reservation; detailed
@@ -128,6 +121,6 @@ For this interview assignment:
 ## What would change with more time
 
 The next production steps would be stronger operational metrics, per-provider
-rate limiting and circuit breaking, explicit secret-manager integration,
+rate limiting and circuit breaking, a real provider adapter/authentication integration,
 partitioned worker queues for very high provider volume, and broader
 PostgreSQL-backed end-to-end verification.
