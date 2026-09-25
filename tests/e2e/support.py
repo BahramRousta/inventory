@@ -141,11 +141,9 @@ def install_api_overrides(
     )
     app.dependency_overrides[get_confirm_reservation_service] = lambda: ConfirmReservationService(
         uow_factory=make_uow,
-        provider_gateways=registry,
     )
     app.dependency_overrides[get_payment_outcome_service] = lambda: ProcessPaymentOutcomeService(
         uow_factory=make_uow,
-        provider_gateways=registry,
     )
 
 
