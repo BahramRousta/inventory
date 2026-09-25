@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     UniqueConstraint,
 )
@@ -44,6 +45,9 @@ class InventoryProviderModel(Base):
     kind: Mapped[ProviderKind] = mapped_column(
         Enum(ProviderKind, native_enum=False, length=32), nullable=False
     )
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Store a secret-manager/config reference, not raw credentials, in application tables.
+    credential_ref: Mapped[str | None] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
@@ -124,10 +128,7 @@ class ReservationLineModel(Base):
     status: Mapped[ReservationLineStatus] = mapped_column(
         Enum(ReservationLineStatus, native_enum=False, length=32), nullable=False
     )
-
-    # Provider-specific hold identifier. NULL for internal inventory lines.
     external_hold_ref: Mapped[str | None] = mapped_column(String(255))
-
     held_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -141,4 +142,17 @@ class ReservationLineModel(Base):
             "stock_source_id",
             name="uq_reservation_line_source",
         ),
+    )
+
+
+class OrderModel(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("reservations.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    user_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
     )
