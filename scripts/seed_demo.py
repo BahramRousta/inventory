@@ -47,22 +47,10 @@ async def main() -> None:
                     name="InternalStock",
                     kind=ProviderKind.INTERNAL,
                     enabled=True,
-                    supports_check=True,
-                    supports_hold=True,
-                    supports_release=True,
-                    supports_get_hold=True,
-                    hold_is_final_allocation=True,
-                    config_key="internal",
                 )
                 session.add(internal)
                 await session.flush()
             internal.enabled = True
-            internal.supports_check = True
-            internal.supports_hold = True
-            internal.supports_release = True
-            internal.supports_get_hold = True
-            internal.hold_is_final_allocation = True
-            internal.config_key = "internal"
 
             external = await session.get(
                 InventoryProviderModel, DEMO_EXTERNAL_PROVIDER_ID
@@ -73,24 +61,10 @@ async def main() -> None:
                     name="FakeExternalProvider",
                     kind=ProviderKind.EXTERNAL,
                     enabled=True,
-                    supports_check=True,
-                    supports_hold=True,
-                    supports_release=True,
-                    supports_get_hold=True,
-                    hold_is_final_allocation=True,
-                    config_key="fake-http",
-                    credential_ref=None,
                 )
                 session.add(external)
                 await session.flush()
             external.enabled = True
-            external.supports_check = True
-            external.supports_hold = True
-            external.supports_release = True
-            external.supports_get_hold = True
-            external.hold_is_final_allocation = True
-            external.config_key = "fake-http"
-            external.credential_ref = None
 
             providers = {
                 "InternalStock": internal,
