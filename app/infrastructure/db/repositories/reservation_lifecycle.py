@@ -27,11 +27,18 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         else:
             expires_at = expires_at.astimezone(timezone.utc)
+        created_at = row.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = created_at.astimezone(timezone.utc)
         return ReservationIdentityRecord(
             reservation_id=row.id,
             user_id=row.user_id,
             idempotency_key=row.idempotency_key,
+            request_fingerprint=row.request_fingerprint,
             status=row.status,
+            created_at=created_at,
             expires_at=expires_at,
         )
 
