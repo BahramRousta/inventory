@@ -103,9 +103,10 @@ The standalone fake provider supports these modes:
 
 - `success`: HOLD succeeds normally.
 - `decline`: HOLD returns a definitive 409 decline.
-- `timeout_after_side_effect`: the provider creates the hold and then delays
-  its response beyond the client timeout. Local state becomes `HOLD_UNKNOWN`
-  and reconciliation later discovers the durable upstream hold.
+- `timeout_after_side_effect`: a mutating provider call applies its HOLD or
+  RELEASE side effect and then delays the response beyond the client timeout.
+  Local state becomes `HOLD_UNKNOWN` or `RELEASE_UNKNOWN`; reconciliation
+  later proves the durable upstream state before any terminal claim is made.
 
 The mode can be changed through the fake provider's
 `POST /admin/mode/{mode}` endpoint for demonstrations.
