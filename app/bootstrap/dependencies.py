@@ -18,7 +18,7 @@ from app.bootstrap.config import get_settings
 from app.infrastructure.clock import SystemClock
 from app.infrastructure.db.session import AsyncSessionLocal
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
-from app.infrastructure.providers.external_hold_http import ExternalHoldHttpGateway
+from app.infrastructure.providers.factory import ProviderGatewayFactory
 
 
 def _uow_factory():
@@ -26,17 +26,7 @@ def _uow_factory():
 
 
 def get_provider_gateway_registry() -> InMemoryProviderGatewayRegistry:
-    settings = get_settings()
-    gateways = {}
-    if (
-        settings.external_provider_id is not None
-        and settings.external_provider_base_url is not None
-    ):
-        gateways[settings.external_provider_id] = ExternalHoldHttpGateway(
-            base_url=settings.external_provider_base_url,
-            hold_timeout_seconds=settings.external_provider_hold_timeout_seconds,
-        )
-    return InMemoryProviderGatewayRegistry(gateways)
+    return ProviderGatewayFactory(get_settings()).create_registry()
 
 
 def get_create_reservation_service() -> CreateReservationService:
@@ -79,7 +69,10 @@ def get_reservation_service() -> GetReservationService:
 
 
 def get_confirm_reservation_service() -> ConfirmReservationService:
-    return ConfirmReservationService(uow_factory=_uow_factory)
+    return ConfirmReservationService(
+        uow_factory=_uow_factory,
+        provider_gateways=get_provider_gateway_registry(),
+    )
 
 
 def get_cancel_reservation_service() -> CancelReservationService:
@@ -87,4 +80,7 @@ def get_cancel_reservation_service() -> CancelReservationService:
 
 
 def get_payment_outcome_service() -> ProcessPaymentOutcomeService:
-    return ProcessPaymentOutcomeService(uow_factory=_uow_factory)
+    return ProcessPaymentOutcomeService(
+        uow_factory=_uow_factory,
+        provider_gateways=get_provider_gateway_registry(),
+    )
