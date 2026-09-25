@@ -17,7 +17,9 @@ This branch implements Steps 1–8 and Step 10.
   persisted and checked for reservation eligibility.
 - Step 8: complete — Compose runs a standalone fake HTTP provider and separate
   hold/release/reconciliation/expiry workers.
-- Step 9: intentionally deferred — no new tests are added or run in this pass.
+- Step 9: test suite added — PostgreSQL-backed API/database, provider,
+  concurrency, claim/lease, reconciliation, and payment-race scenarios are
+  implemented. Execution still requires a disposable `TEST_DATABASE_URL`.
 - Step 10: complete — README, architecture, async-state-machine and scalability
   documentation describe the implemented behavior.
 
