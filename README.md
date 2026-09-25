@@ -162,7 +162,8 @@ configuration values. Defaults are documented in `SCALABILITY.md`.
 
 ## Design documents
 
-- `docs/ARCHITECTURE.md`
+- `ARCHITECTURE.md` (submission deliverable)
+- `docs/ARCHITECTURE.md` (same architecture baseline under docs)
 - `docs/ASYNC_PROVIDER_STATE_MACHINE.md`
 - `SCALABILITY.md`
 - `REMEDIATION_WORKFLOW.md`
