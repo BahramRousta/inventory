@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import case, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,8 +255,13 @@ class SqlAlchemyReservationRepository:
                 ~has_unresolved_line,
             )
             .values(
-                status=ReservationStatus.CANCELLED,
-                release_reason="CREATE_FAILED",
+                status=case(
+                    (
+                        ReservationModel.release_reason == "EXPIRED",
+                        ReservationStatus.EXPIRED,
+                    ),
+                    else_=ReservationStatus.CANCELLED,
+                )
             )
         )
         await self._session.flush()
@@ -342,7 +347,10 @@ class SqlAlchemyReservationRepository:
                 ReservationModel.id == reservation_id,
                 ReservationModel.status == ReservationStatus.RESERVING,
             )
-            .values(status=ReservationStatus.RELEASING)
+            .values(
+                status=ReservationStatus.RELEASING,
+                release_reason="CREATE_FAILED",
+            )
         )
         await self._session.flush()
         return result.rowcount == 1
