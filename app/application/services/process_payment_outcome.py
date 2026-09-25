@@ -14,6 +14,10 @@ from app.application.errors import (
     ReservationNotFound,
     ReservationStateConflict,
 )
+from app.application.ports.provider_gateway import (
+    InMemoryProviderGatewayRegistry,
+    ProviderGatewayRegistry,
+)
 from app.application.ports.repositories import UnitOfWork
 from app.application.services.finalize_reservation import finalize_confirming_reservation
 from app.domain.enums import PaymentOutcome, ReservationLineStatus, ReservationStatus
@@ -26,8 +30,14 @@ _ATTENTION_STATES = {
 
 
 class ProcessPaymentOutcomeService:
-    def __init__(self, *, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        *,
+        uow_factory: Callable[[], UnitOfWork],
+        provider_gateways: ProviderGatewayRegistry | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
     async def execute(self, command: PaymentOutcomeCommand) -> PaymentOutcomeResult:
         payload_hash = _payload_hash(command)
@@ -85,6 +95,7 @@ class ProcessPaymentOutcomeService:
                         uow,
                         reservation_id=command.reservation_id,
                         user_id=command.user_id,
+                        provider_gateways=self._provider_gateways,
                     )
                 else:
                     raise ReservationStateConflict(
