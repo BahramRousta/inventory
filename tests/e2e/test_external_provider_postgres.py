@@ -705,3 +705,130 @@ async def test_expiry_before_external_hold_claim_finishes_expired_without_provid
     async with httpx.AsyncClient(timeout=1.0) as client:
         provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
     assert provider_state.status_code == 404
+
+
+async def test_payment_failure_while_hold_unknown_reconciles_then_releases_real_remote_hold(
+    postgres_session_factory,
+    fake_provider_url,
+):
+    await _set_provider_mode(fake_provider_url, "timeout_after_side_effect")
+    source = await seed_external_source(
+        postgres_session_factory,
+        sku="EXT-UNKNOWN-THEN-FAIL",
+    )
+    registry = _registry(source.provider_id, fake_provider_url, timeout=0.05)
+
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        created = await client.post(
+            "/reservations",
+            headers=create_headers(idempotency_key="unknown-then-fail"),
+            json=create_body(source),
+        )
+    assert created.status_code == 202
+
+    work = await _claim_and_process_hold(postgres_session_factory, registry)
+    hold_key = f"{work.reservation_id}:{source.source_id}:HOLD"
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.HOLD_UNKNOWN
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RESERVING
+
+    event_id = uuid4()
+    async with api_client(
+        postgres_session_factory, provider_gateways=registry
+    ) as client:
+        failed = await client.post(
+            f"/reservations/{work.reservation_id}/payment-outcome",
+            headers=create_headers(user_id="user-1"),
+            json={"event_id": str(event_id), "outcome": "FAILURE"},
+        )
+    assert failed.status_code == 202
+    assert failed.json()["status"] == "RELEASING"
+    assert failed.json()["requires_attention"] is True
+
+    # Compensation cannot guess whether the timed-out HOLD happened.
+    await ProcessReleasingReservationService(
+        uow_factory=uow_factory(postgres_session_factory)
+    ).execute(work.reservation_id)
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.HOLD_UNKNOWN
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+
+    await _set_provider_mode(fake_provider_url, "success")
+    async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
+        unknown = await uow.reservations.claim_unknown_external_holds(
+            limit=10,
+            lease_seconds=30,
+        )
+        await uow.commit()
+    assert len(unknown) == 1
+
+    reconciled = await ReconcileProviderWorkService(
+        uow_factory=uow_factory(postgres_session_factory),
+        provider_gateways=registry,
+    ).reconcile_hold(unknown[0])
+    assert reconciled is True
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.RELEASE_PENDING
+    assert line.external_hold_ref
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.RELEASING
+
+    async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
+        releases = await uow.reservations.claim_pending_external_releases(
+            limit=10,
+            lease_seconds=30,
+        )
+        await uow.commit()
+    assert len(releases) == 1
+
+    released = await ProcessClaimedProviderReleaseService(
+        uow_factory=uow_factory(postgres_session_factory),
+        provider_gateways=registry,
+    ).execute(releases[0])
+    assert released is True
+
+    async with postgres_session_factory() as session:
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == work.reservation_id
+            )
+        )
+        reservation = await session.get(ReservationModel, work.reservation_id)
+    assert line is not None
+    assert line.status == ReservationLineStatus.RELEASED
+    assert reservation is not None
+    assert reservation.status == ReservationStatus.CANCELLED
+    assert reservation.release_reason == "PAYMENT_FAILED"
+
+    async with httpx.AsyncClient(timeout=1.0) as client:
+        provider_state = await client.get(f"{fake_provider_url}/holds/{hold_key}")
+    assert provider_state.status_code == 200
+    assert provider_state.json()["status"] == "RELEASED"
