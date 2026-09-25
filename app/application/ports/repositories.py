@@ -3,6 +3,8 @@ from typing import Protocol
 from uuid import UUID
 
 from app.application.dto.reservations import (
+    OrderLineRecord,
+    PaymentEventRecord,
     ReservationIdentityRecord,
     ExternalReleaseRecord,
     PendingExternalHoldRecord,
@@ -33,6 +35,7 @@ class ReservationRepository(Protocol):
         reservation_id: UUID,
         user_id: str,
         idempotency_key: str,
+        request_fingerprint: str,
         expires_at: datetime,
         status: ReservationStatus,
     ) -> None: ...
@@ -186,7 +189,18 @@ class InternalInventoryRepository(Protocol):
 
 class OrderRepository(Protocol):
     async def get_by_reservation_id(self, reservation_id: UUID) -> UUID | None: ...
-    async def create(self, *, reservation_id: UUID, user_id: str) -> UUID: ...
+    async def create_with_lines(
+        self,
+        *,
+        reservation_id: UUID,
+        user_id: str,
+        lines: tuple[OrderLineRecord, ...],
+    ) -> UUID: ...
+
+
+class PaymentEventRepository(Protocol):
+    async def get(self, event_id: UUID) -> PaymentEventRecord | None: ...
+    async def create(self, event: PaymentEventRecord) -> None: ...
 
 
 class UnitOfWork(Protocol):
@@ -194,6 +208,7 @@ class UnitOfWork(Protocol):
     reservations: ReservationRepository
     inventory: InternalInventoryRepository
     orders: OrderRepository
+    payment_events: PaymentEventRepository
 
     async def __aenter__(self) -> "UnitOfWork": ...
     async def __aexit__(self, exc_type, exc, tb) -> None: ...
