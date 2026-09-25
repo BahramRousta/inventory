@@ -12,7 +12,7 @@ This branch implements Steps 1–8 and Step 10.
   and failure transitions.
 - Step 5: complete — the configured provider contract is explicitly
   **HOLD is final allocation** and is persisted as capability metadata.
-- Step 6: complete — orders persist immutable order lines.
+- Step 6: complete — orders persist immutable reservation lines.
 - Step 7: complete — provider capabilities are declared by adapter
   configuration/factory code, while endpoints and credentials are injected from
   environment-backed settings and checked for reservation eligibility.
@@ -130,8 +130,9 @@ trusted payment result.
 
 1. Add a payment outcome input with `event_id`, `reservation_id`, verified
    user, and `SUCCESS` or `FAILURE`.
-2. Persist event identity/payload identity so duplicate delivery is harmless
-   and a reused event ID with different content is a conflict.
+2. Keep payment processing outside this service; apply trusted outcomes through
+   idempotent reservation state transitions and the unique order-per-reservation
+   constraint.
 3. On eligible `SUCCESS`, atomically claim `ACTIVE -> CONFIRMING` only before
    expiry according to database time.
 4. On `FAILURE`, atomically claim `RESERVING|ACTIVE -> RELEASING`.
@@ -182,19 +183,19 @@ header exists.
 
 **Implementation:**
 
-1. Add immutable order-line persistence for product, stock source, quantity,
-   and any assignment-required source/provider reference.
-2. Create the order header and all lines exactly once per reservation.
-3. For internal lines, consume held stock and insert the local order in the
+1. Create one final order header exactly once per reservation.
+2. For internal lines, consume held stock and create the local order in the
    same transaction.
-4. Do not create the final order while any external required commit is
+3. Do not create the final order while any external required commit is
    unknown.
+4. Keep detailed item/source information on reservation lines rather than
+   duplicating it into a second reservation-line model for this assignment.
 
 **Assumption:** one reservation creates at most one order, enforced by the
 existing unique reservation reference plus idempotent creation behavior.
 
-**Done when:** an order can independently explain every finalized reservation
-line without consulting mutable reservation records.
+**Done when:** a confirmed reservation creates at most one order and the reservation lines
+remain the item/source detail for the assignment.
 
 ## Step 7 — Persist provider capability and safe configuration metadata
 
@@ -248,13 +249,13 @@ processes while reconciliation still observes the same provider state.
 **Required evidence when authorized:**
 
 1. PostgreSQL-backed API-to-database tests for internal hold, confirm, cancel,
-   expiry, idempotency, duplicate lines, and final order lines.
+   expiry, idempotency, duplicate lines, and final reservation lines.
 2. Concurrent final-unit test against PostgreSQL.
 3. Actual fake-HTTP-provider tests for hold success, definitive decline,
    timeout-after-side-effect, release, and reconciliation.
 4. Worker claim/lease tests proving `FOR UPDATE SKIP LOCKED`, stale-lease
    recovery, and no duplicate local state transition.
-5. Payment-vs-expiry and duplicate/contradictory payment-event tests.
+5. Payment-vs-expiry and duplicate/contradictory payment-outcome tests.
 
 Mock only the provider boundary where an actual fake HTTP provider is not the
 specific behavior under demonstration. Database assertions must use real
@@ -284,7 +285,7 @@ implemented public behavior is missing from the submission guide.
 1 wiring
 2 terminal semantics
 3 HTTP contract
-4 payment event
+4 payment outcome
 5 provider final commit decision + implementation
 6 immutable orders
 7 provider capabilities/config
