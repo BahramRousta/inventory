@@ -2,15 +2,31 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response, status
 
-from app.api.schemas.reservations import CreateReservationRequest, CreateReservationResponse, ReservationResponse, \
-    ConfirmReservationResponse
-from app.application.dto.reservations import CreateReservationCommand, ReservationItemCommand
+from app.api.schemas.reservations import (
+    ConfirmReservationResponse,
+    CreateReservationRequest,
+    CreateReservationResponse,
+    PaymentOutcomeRequest,
+    PaymentOutcomeResponse,
+    ReservationResponse,
+)
+from app.application.dto.reservations import (
+    CreateReservationCommand,
+    PaymentOutcomeCommand,
+    ReservationItemCommand,
+)
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
 from app.application.services.get_reservation import GetReservationService
-from app.bootstrap.dependencies import get_create_reservation_service, get_reservation_service, \
-    get_confirm_reservation_service, get_cancel_reservation_service
+from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
+from app.bootstrap.dependencies import (
+    get_cancel_reservation_service,
+    get_confirm_reservation_service,
+    get_create_reservation_service,
+    get_payment_outcome_service,
+    get_reservation_service,
+)
 from app.domain.enums import ReservationStatus
 
 
@@ -21,8 +37,10 @@ def _reservation_response(result) -> ReservationResponse:
     return ReservationResponse(
         reservation_id=result.reservation_id,
         status=result.status,
+        created_at=result.created_at,
         expires_at=result.expires_at,
         payment_allowed=result.payment_allowed,
+        requires_attention=result.requires_attention,
         lines=[
             {
                 "product_id": line.product_id,
@@ -34,16 +52,24 @@ def _reservation_response(result) -> ReservationResponse:
         ],
     )
 
-@router.post("", response_model=CreateReservationResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post("", response_model=CreateReservationResponse)
 async def create_reservation(
     body: CreateReservationRequest,
     response: Response,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=200,
+    ),
+    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: CreateReservationService = Depends(get_create_reservation_service),
 ) -> CreateReservationResponse:
     result = await service.execute(
         CreateReservationCommand(
-            user_id=body.user_id,
-            idempotency_key=body.idempotency_key,
+            user_id=user_id,
+            idempotency_key=idempotency_key,
             items=tuple(
                 ReservationItemCommand(
                     product_id=item.product_id,
@@ -54,28 +80,77 @@ async def create_reservation(
             ),
         )
     )
-    response.status_code = (
-        status.HTTP_202_ACCEPTED
-        if result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}
-        else status.HTTP_201_CREATED
-    )
+    response.headers["Location"] = f"/reservations/{result.reservation_id}"
+
+    if result.replayed:
+        response.status_code = status.HTTP_200_OK
+    elif result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}:
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Retry-After"] = "1"
+    else:
+        response.status_code = status.HTTP_201_CREATED
+
     return CreateReservationResponse(**_reservation_response(result).model_dump())
 
 
 @router.get("/{reservation_id}", response_model=ReservationResponse)
 async def get_reservation(
     reservation_id: UUID,
+    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: GetReservationService = Depends(get_reservation_service),
 ) -> ReservationResponse:
-    return _reservation_response(await service.execute(reservation_id))
+    return _reservation_response(
+        await service.execute(reservation_id, user_id=user_id)
+    )
 
 
-@router.post("/{reservation_id}/confirm", response_model=ConfirmReservationResponse)
+@router.post(
+    "/{reservation_id}/payment-outcome",
+    response_model=PaymentOutcomeResponse,
+)
+async def process_payment_outcome(
+    reservation_id: UUID,
+    body: PaymentOutcomeRequest,
+    response: Response,
+    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
+    service: ProcessPaymentOutcomeService = Depends(get_payment_outcome_service),
+) -> PaymentOutcomeResponse:
+    result = await service.execute(
+        PaymentOutcomeCommand(
+            event_id=body.event_id,
+            reservation_id=reservation_id,
+            user_id=user_id,
+            outcome=body.outcome,
+        )
+    )
+    if result.status == ReservationStatus.RELEASING:
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Retry-After"] = "1"
+    else:
+        response.status_code = status.HTTP_200_OK
+
+    base = _reservation_response(result)
+    return PaymentOutcomeResponse(
+        **base.model_dump(),
+        order_id=result.order_id,
+    )
+
+
+@router.post(
+    "/{reservation_id}/confirm",
+    response_model=ConfirmReservationResponse,
+    deprecated=True,
+    description=(
+        "Administrative compatibility endpoint. Checkout should submit a trusted "
+        "payment outcome instead."
+    ),
+)
 async def confirm_reservation(
     reservation_id: UUID,
+    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: ConfirmReservationService = Depends(get_confirm_reservation_service),
 ) -> ConfirmReservationResponse:
-    result = await service.execute(reservation_id)
+    result = await service.execute(reservation_id, user_id=user_id)
     base = _reservation_response(result)
     return ConfirmReservationResponse(
         **base.model_dump(),
@@ -90,6 +165,9 @@ async def confirm_reservation(
 )
 async def cancel_reservation(
     reservation_id: UUID,
+    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: CancelReservationService = Depends(get_cancel_reservation_service),
 ) -> ReservationResponse:
-    return _reservation_response(await service.execute(reservation_id))
+    return _reservation_response(
+        await service.execute(reservation_id, user_id=user_id)
+    )
