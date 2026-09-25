@@ -4,7 +4,7 @@ import pytest
 
 from app.application.dto.reservations import CreateReservationCommand, ReservationItemCommand
 from app.application.errors import IdempotencyConflict, InsufficientStock
-from app.application.services.create_reservation import CreateReservationService
+from app.application.services.create.create_reservation import CreateReservationService
 from app.domain.enums import ReservationStatus
 from app.infrastructure.db.models import InternalStockModel
 
