@@ -2,8 +2,9 @@
 
 All tests in this matrix use a real PostgreSQL database through
 `TEST_DATABASE_URL`. Every E2E/API scenario asserts persisted database state,
-not only HTTP responses. Provider scenarios use configurable capability-specific mock gateways; all
-reservation/worker persistence still uses real PostgreSQL.
+not only HTTP responses. Provider scenarios use configurable implementations of one provider interface;
+query-style and hold-style providers both execute through `reserve(...)`, while
+all reservation/worker persistence still uses real PostgreSQL.
 
 | Area | Scenario | Main test file |
 |---|---|---|
@@ -18,8 +19,8 @@ reservation/worker persistence still uses real PostgreSQL.
 | Idempotency | identical settled replay returns same reservation without a second hold | `test_reservation_api_postgres.py` |
 | Idempotency | changed body with same key conflicts | `test_reservation_api_postgres.py` |
 | Idempotency | pending external replay stays 202 and creates one work item | `test_external_provider_postgres.py` |
-| Provider eligibility | query-only provider rejected for reservation workflow | `test_reservation_api_postgres.py` |
-| Provider eligibility | missing reservation gateway rejected | `test_reservation_api_postgres.py` |
+| Provider execution | query-style provider reserves through availability semantics | `test_external_provider_postgres.py` |
+| Create | enabled external source is accepted before provider processing | `test_reservation_api_postgres.py` |
 | Read | owner sees persisted snapshot | `test_reservation_api_postgres.py` |
 | Read | missing reservation / wrong owner returns 404 | `test_reservation_api_postgres.py` |
 | Cancel | ACTIVE internal -> RELEASING -> CANCELLED and hold released once | `test_reservation_api_postgres.py` |
