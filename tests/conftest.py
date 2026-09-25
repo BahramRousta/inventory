@@ -1,12 +1,7 @@
-import asyncio
 import os
-import socket
-import subprocess
-import sys
 from pathlib import Path
 from uuid import uuid4
 
-import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -89,60 +84,3 @@ async def postgres_session_factory():
             await connection.run_sync(Base.metadata.drop_all)
         await engine.dispose()
 
-
-@pytest_asyncio.fixture
-async def fake_provider_url():
-    """Run the assignment fake provider as an independent HTTP process."""
-    repo_root = Path(__file__).resolve().parents[1]
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-
-    env = os.environ.copy()
-    env["FAKE_PROVIDER_MODE"] = "success"
-    env["FAKE_PROVIDER_TIMEOUT_SECONDS"] = "0.5"
-
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "app.fake_provider:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
-        ],
-        cwd=repo_root,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    base_url = f"http://127.0.0.1:{port}"
-
-    try:
-        ready = False
-        async with httpx.AsyncClient(timeout=0.25) as client:
-            for _ in range(60):
-                if process.poll() is not None:
-                    break
-                try:
-                    response = await client.get(f"{base_url}/health")
-                    if response.status_code == 200:
-                        ready = True
-                        break
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(0.05)
-        if not ready:
-            pytest.fail("Fake provider did not start.")
-        yield base_url
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=3)
