@@ -1,5 +1,8 @@
 from app.application.ports.provider_gateway import InMemoryProviderGatewayRegistry
+from app.application.services.cancel_reservation import CancelReservationService
+from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
+from app.application.services.get_reservation import GetReservationService
 from app.application.services.process_pending_provider_hold import (
     ProcessPendingProviderHoldService,
 )
@@ -19,6 +22,10 @@ from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from app.infrastructure.providers.external_hold_http import ExternalHoldHttpGateway
 
 
+def _uow_factory():
+    return SqlAlchemyUnitOfWork(AsyncSessionLocal)
+
+
 def get_create_reservation_service() -> CreateReservationService:
     settings = get_settings()
     gateways = {}
@@ -31,11 +38,23 @@ def get_create_reservation_service() -> CreateReservationService:
             hold_timeout_seconds=settings.external_provider_hold_timeout_seconds,
         )
     return CreateReservationService(
-        uow_factory=lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal),
+        uow_factory=_uow_factory,
         clock=SystemClock(),
         ttl_seconds=settings.reservation_ttl_seconds,
         provider_gateways=InMemoryProviderGatewayRegistry(gateways),
     )
+
+
+def get_reservation_service() -> GetReservationService:
+    return GetReservationService(uow_factory=_uow_factory)
+
+
+def get_confirm_reservation_service() -> ConfirmReservationService:
+    return ConfirmReservationService(uow_factory=_uow_factory)
+
+
+def get_cancel_reservation_service() -> CancelReservationService:
+    return CancelReservationService(uow_factory=_uow_factory)
 
 
 def get_provider_worker_tick_service() -> ProviderWorkerTickService:
@@ -50,23 +69,22 @@ def get_provider_worker_tick_service() -> ProviderWorkerTickService:
             hold_timeout_seconds=settings.external_provider_hold_timeout_seconds,
         )
     registry = InMemoryProviderGatewayRegistry(gateways)
-    uow_factory = lambda: SqlAlchemyUnitOfWork(AsyncSessionLocal)
     work_lock = PostgresProviderWorkLock(engine)
     return ProviderWorkerTickService(
-        uow_factory=uow_factory,
-        select_pending_hold=SelectPendingProviderHoldService(uow_factory=uow_factory),
+        uow_factory=_uow_factory,
+        select_pending_hold=SelectPendingProviderHoldService(uow_factory=_uow_factory),
         process_pending_hold=ProcessPendingProviderHoldService(
-            uow_factory=uow_factory,
+            uow_factory=_uow_factory,
             provider_gateways=registry,
             work_lock=work_lock,
         ),
         process_releasing=ProcessReleasingReservationService(
-            uow_factory=uow_factory,
+            uow_factory=_uow_factory,
             provider_gateways=registry,
             work_lock=work_lock,
         ),
         reconcile_work=ReconcileProviderWorkService(
-            uow_factory=uow_factory,
+            uow_factory=_uow_factory,
             provider_gateways=registry,
             work_lock=work_lock,
         ),
