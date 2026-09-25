@@ -52,14 +52,14 @@ def get_process_releasing_reservation_service() -> ProcessReleasingReservationSe
 def get_process_claimed_provider_release_service() -> ProcessClaimedProviderReleaseService:
     return ProcessClaimedProviderReleaseService(
         uow_factory=_uow_factory,
-        provider_gateways=get_provider_gateway_registry(),
+        providers=get_provider_registry(),
     )
 
 
 def get_reconcile_provider_work_service() -> ReconcileProviderWorkService:
     return ReconcileProviderWorkService(
         uow_factory=_uow_factory,
-        provider_gateways=get_provider_gateway_registry(),
+        providers=get_provider_registry(),
     )
 
 
@@ -68,10 +68,7 @@ def get_reservation_service() -> GetReservationService:
 
 
 def get_confirm_reservation_service() -> ConfirmReservationService:
-    return ConfirmReservationService(
-        uow_factory=_uow_factory,
-        provider_gateways=get_provider_gateway_registry(),
-    )
+    return ConfirmReservationService(uow_factory=_uow_factory)
 
 
 def get_cancel_reservation_service() -> CancelReservationService:
@@ -79,7 +76,4 @@ def get_cancel_reservation_service() -> CancelReservationService:
 
 
 def get_payment_outcome_service() -> ProcessPaymentOutcomeService:
-    return ProcessPaymentOutcomeService(
-        uow_factory=_uow_factory,
-        provider_gateways=get_provider_gateway_registry(),
-    )
+    return ProcessPaymentOutcomeService(uow_factory=_uow_factory)
