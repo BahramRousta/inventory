@@ -1,125 +1,424 @@
-# Scalability
+# SCALABILITY
 
-## Current shape
+## 1. Current deployment model
 
-The service deliberately uses PostgreSQL as both the transactional authority and
-the durable provider-work queue. This keeps the assignment operationally small
-while preserving correctness under concurrent reservation requests and worker
-processes.
+The implementation is intentionally small:
 
-The default worker settings are:
+```text
+API processes
+    |
+    v
+PostgreSQL
+    ^
+    |
+    +-- hold workers
+    +-- release workers
+    +-- reconciliation workers
+    +-- expiry workers
+```
 
-- batch size: 500 claimed rows;
-- concurrency: 5 provider calls per worker process;
-- lease: 60 seconds;
-- poll interval: 1 second.
+PostgreSQL is the only durable infrastructure component.
 
-These are configuration defaults, not throughput guarantees.
+The API processes are stateless and can be replicated. Workers are also
+replicable because claims are coordinated through database row locks, claim
+tokens, and leases.
 
-## First bottlenecks
+Default worker configuration:
 
-### Provider latency and rate limits
+```text
+reservation TTL       = 900 seconds
+poll interval         = 1 second
+claim batch size      = 500
+worker concurrency    = 5
+claim lease           = 60 seconds
+```
 
-External calls will normally become the first throughput constraint. Increasing
-worker concurrency blindly can amplify provider failures or trigger upstream
-rate limits. Concurrency should therefore be tuned per provider, with metrics
-for latency, timeout rate, decline rate and reconciliation backlog.
+These values are configuration defaults, not throughput guarantees.
 
-At larger scale I would add provider-specific concurrency/rate-limit controls
-before adding a message broker.
+## 2. Expected first bottleneck: hot inventory rows
 
-### PostgreSQL work scanning
+For internal inventory, reservation uses a guarded atomic update of one
+`internal_stock` row.
 
-Workers repeatedly query reservation lines by status and lease deadline. The
-current `ix_reservation_line_work_claim(status, provider_lease_until)` index
-supports recovery and work selection, while
-`ix_reservation_status_expiry(status, expires_at)` supports TTL scanning.
+That is correct but means a very popular stock source becomes a serialization
+point:
 
-At high row counts, the next improvement would be partial indexes for active
-work states and bounded archival of terminal reservation history. Work should
-continue to use `FOR UPDATE SKIP LOCKED` so competing workers claim different
-rows instead of blocking.
+```text
+many checkout requests
+        |
+        v
+same internal_stock row
+        |
+        v
+row-update contention
+```
 
-### Hot internal inventory rows
+This is the first database bottleneck I would expect for flash-sale style
+traffic.
 
-Internal stock reservation is a guarded atomic UPDATE. This prevents oversell,
-but a very popular SKU can become a single-row serialization point. That is a
-correctness-preserving bottleneck. Possible later options are inventory
-sharding by physical bucket, pre-allocation pools, or queueing extremely hot
-SKU mutations, but those add operational and reconciliation complexity.
+I would keep this design until contention is measured because it gives a simple
+and strong no-oversell invariant.
 
-## Why there is no queue yet
+Signals that justify changing it:
 
-A broker would improve decoupling and reduce polling at sufficient volume, but
-it would also introduce a second durable system and require an outbox/inbox
-protocol. For the assignment's scale, PostgreSQL already contains the exact
-durable state required to recover work, and `SKIP LOCKED` supports horizontal
-worker scaling.
+- materially increasing lock wait time on `internal_stock`;
+- checkout latency dominated by inventory-row updates;
+- high abort/retry rate for a small number of hot SKUs;
+- database CPU is not saturated but transactions are waiting on the same rows.
 
-A broker becomes justified when database work polling materially competes with
-checkout traffic, when provider workloads need independent retention/replay, or
-when cross-service consumers need the same events. At that point I would add a
-transactional outbox rather than publish directly from reservation
-transactions.
+Possible next designs, in increasing complexity:
 
-## Horizontal scaling
+1. split one logical stock source into physical inventory buckets where that
+   matches the warehouse model;
+2. pre-allocate inventory pools to partitions/regions;
+3. serialize extremely hot SKU mutations through a dedicated queue;
+4. shard inventory ownership only when the operational model requires it.
 
-API instances are stateless and can scale horizontally behind a load balancer.
-Workers can also scale horizontally because claims are database coordinated.
-The standalone fake provider must remain a single demo process because its
-state is intentionally in memory; a real provider owns its own durable state.
+I would not introduce sharding preemptively because cross-shard reservation and
+rebalancing are significantly harder than a single guarded SQL update.
 
-For production provider adapters, no correctness assumption depends on a worker
-staying alive. Claim leases recover crashed local workers and provider
-idempotency keys/reconciliation recover ambiguous remote side effects.
+## 3. External providers are usually the first end-to-end throughput limit
 
-## Database pool and connection pressure
+Remote providers have independent latency, availability, and rate limits.
 
-Every API instance and worker process has its own SQLAlchemy pool. Increasing
-process counts therefore multiplies PostgreSQL connections. Pool sizes should
-be set from the database connection budget rather than copied unchanged across
-replicas. A connection pooler such as PgBouncer becomes useful before very
-large replica counts.
+The current design keeps those calls outside database transactions, so a slow
+provider does not hold SQL locks. However, provider latency still determines
+how quickly external reservations leave `RESERVING`.
 
-## Non-atomic external boundary
+Approximate worker capacity for one process is bounded by:
 
-No local database transaction can atomically commit an HTTP provider side
-effect. The design explicitly accepts this and records UNKNOWN states when the
-outcome cannot be proven. Reconciliation, stable idempotency keys, and
-non-terminal UNKNOWN states are the recovery mechanism.
+```text
+concurrency / average provider latency
+```
 
-This means availability may be temporarily reduced during provider outages:
-ambiguous inventory is intentionally not released for payment or reported as
-success until truth is established.
+For example, with concurrency 5, increasing the batch size above 500 does not
+itself increase provider-call throughput.
 
-## Provider contract growth
+The metrics I would watch per provider are:
 
-The demo uses "HOLD is final allocation". Providers that require a post-payment
-commit would need a separate persisted capability and a CONFIRM worker using
-the same claim/lease/idempotency/reconciliation pattern. The existing
-`CONFIRM_PENDING` and `CONFIRM_UNKNOWN` line states leave room for that
-without pretending the current HTTP adapter supports it.
+- reserve latency p50/p95/p99;
+- release latency;
+- error/timeout rate;
+- decline rate;
+- number and age of `HOLD_PENDING`;
+- number and age of `HOLD_UNKNOWN`;
+- number and age of `RELEASE_UNKNOWN`;
+- reconciliation success rate.
 
-## Observability and operations
+Scale worker concurrency only within the provider's allowed rate limit.
 
-Before production scale-out I would add:
+## 4. Provider isolation
 
-- metrics by reservation/line state and age;
-- oldest UNKNOWN and oldest leased-work gauges;
-- provider latency/error/reconciliation metrics;
-- alerts for growing `RELEASING`, `HOLD_UNKNOWN`, and
-  `RELEASE_UNKNOWN` backlogs;
-- structured logs containing reservation/provider IDs and operation keys but
-  never provider credentials or secret payloads;
-- dead-letter/manual-review tooling only after an operational timeout policy is
-  defined.
+Today a worker uses one global concurrency setting.
 
-## Next scale-out order
+At moderate scale that is sufficient. At higher provider volume, one slow or
+unhealthy provider can consume worker slots and increase latency for healthy
+providers.
 
-1. Tune database indexes, pool budgets and per-provider worker concurrency.
-2. Add provider-specific rate limiting/circuit breaking.
-3. Archive terminal workflow rows and use partial work indexes.
-4. Add transactional outbox + broker only when PostgreSQL polling becomes a
-   measured bottleneck or other services need the event stream.
-5. Partition/shard inventory only for demonstrated hot-row or data-volume
-   pressure.
+A concrete trigger for per-provider isolation is:
+
+> one provider's queue age grows or its latency/errors materially affect
+> processing latency for unrelated providers.
+
+At that point I would introduce:
+
+- per-provider concurrency limits;
+- per-provider rate limiting;
+- circuit breakers/backoff;
+- optionally separate worker pools by provider.
+
+This change should happen before adding a general-purpose broker.
+
+## 5. PostgreSQL work-queue scaling
+
+Workers select work using statuses and
+`FOR UPDATE SKIP LOCKED`.
+
+Relevant indexes are:
+
+```text
+reservations(status, expires_at)
+reservation_lines(status, provider_lease_until)
+```
+
+`SKIP LOCKED` lets multiple workers claim independent rows without waiting on
+each other.
+
+The likely database problems at larger history sizes are:
+
+- scanning too many terminal rows;
+- index growth;
+- vacuum pressure from frequent state updates;
+- increased contention between API transactions and worker scans.
+
+Signals that justify work-queue changes:
+
+- work-claim queries become a meaningful fraction of database load;
+- p95 claim latency grows as terminal history grows;
+- workers cannot keep up even though provider capacity is available;
+- autovacuum/index maintenance becomes operationally significant.
+
+Before introducing a broker I would:
+
+1. add/verify partial indexes targeting only active work states;
+2. archive old terminal reservations;
+3. keep claim batches bounded;
+4. tune polling intervals;
+5. separate API and worker database connection budgets.
+
+## 6. Why no message broker yet
+
+A broker is not automatically more scalable.
+
+Introducing Kafka/RabbitMQ/SQS would create two durability domains:
+
+```text
+PostgreSQL transaction
++
+message publication
+```
+
+Correct publication would then require an outbox/inbox design.
+
+For the assignment, the work already exists durably in PostgreSQL and workers
+can recover it after crashes, so polling is a simpler design.
+
+I would introduce a broker when at least one of these becomes true:
+
+- PostgreSQL polling measurably competes with checkout traffic;
+- provider work needs much higher independent throughput;
+- multiple other services need reservation events;
+- retention/replay requirements exceed what the operational reservation tables
+  should provide;
+- queue age cannot be controlled economically by database workers.
+
+The migration path would be:
+
+```text
+reservation transaction
+    |
+    +-- write outbox row atomically
+    |
+outbox publisher
+    |
+broker
+    |
+provider workers / other consumers
+```
+
+I would not publish directly to a broker inside the reservation transaction.
+
+## 7. Expiration scanning
+
+Expiry workers search reservations by:
+
+```text
+(status, expires_at)
+```
+
+The existing index supports this access pattern.
+
+The scan remains inexpensive while the active reservation set is bounded.
+
+Signals that require a different strategy:
+
+- expiry scans consume noticeable database IO;
+- millions of simultaneously active reservations;
+- expiration precision requirements become tighter than the polling interval;
+- worker lag causes reservations to remain held materially past their TTL.
+
+Possible next steps:
+
+1. tune batch size and poll interval;
+2. use partial indexes for expirable states;
+3. partition/archive old reservations;
+4. only then consider a dedicated delayed-queue/timer system.
+
+## 8. Database connection pressure
+
+Horizontal scaling of API and worker processes multiplies connection pools.
+
+The database connection budget should be treated as:
+
+```text
+API replicas * API pool size
++
+worker replicas * worker pool size
++
+migration/admin connections
+<= PostgreSQL connection budget
+```
+
+A large number of stateless replicas is not useful if they exhaust PostgreSQL
+connections.
+
+A connection pooler such as PgBouncer becomes useful before very large replica
+counts.
+
+## 9. Confirmation contention
+
+Confirmation uses an atomic state transition:
+
+```text
+ACTIVE -> CONFIRMING
+```
+
+followed by local inventory consumption, line confirmation, and order creation
+in one transaction.
+
+The unique order constraint:
+
+```text
+orders.reservation_id UNIQUE
+```
+
+protects against duplicate order creation.
+
+The main scalability property is that confirmation locks only the reservation
+and inventory rows involved in that checkout; there is no global lock.
+
+For large carts, transaction duration grows with line count. A practical limit
+on reservation line count would therefore be appropriate in production.
+
+## 10. Non-atomic external-provider boundary
+
+No SQL transaction can atomically include a remote provider operation.
+
+The current pattern is:
+
+```text
+claim in DB
+commit
+call provider
+persist result in DB
+```
+
+This means a worker may crash after the provider acts but before the local
+result is stored.
+
+The design handles this with:
+
+- stable reservation keys;
+- `UNKNOWN` states;
+- lease recovery;
+- provider status lookup/reconciliation.
+
+This recovery model scales better than holding a database transaction open
+during remote calls.
+
+The operational tradeoff is temporary uncertainty: during provider outages,
+some inventory may remain unavailable while reconciliation is pending.
+
+## 11. Query-only provider limitation at scale
+
+A query-only provider does not provide globally exclusive stock ownership.
+
+That is not primarily a throughput problem; it is a correctness boundary.
+
+At low traffic a best-effort availability check may appear sufficient. Under
+higher contention the probability of external oversell increases because other
+clients of that provider can consume the same inventory after the check.
+
+Therefore the trigger is not database load. The trigger is the business
+requirement:
+
+> if checkout must guarantee external inventory, query-only providers cannot be
+> treated as equivalent to a real HOLD provider.
+
+At that point the options are:
+
+- reject that provider for guaranteed checkout;
+- require the provider to expose an allocation/HOLD API;
+- accept and explicitly expose a weaker best-effort guarantee.
+
+No amount of local scaling can create a lock in another system.
+
+## 12. Data growth
+
+The largest growing tables are expected to be:
+
+- reservations;
+- reservation lines.
+
+Most operational worker queries care only about non-terminal states.
+
+When terminal history becomes large, I would:
+
+1. archive old confirmed/cancelled/expired reservations to a history store or
+   partition;
+2. keep active-work indexes small with partial indexes;
+3. preserve order/reservation identifiers needed for audit;
+4. avoid deleting unresolved provider work until reconciliation policy allows
+   it.
+
+A change is justified when operational query latency or maintenance cost is
+measurably affected by historical data.
+
+## 13. Caching
+
+Redis is not required for reservation correctness.
+
+Caching product or read-only reservation views may reduce read load, but writes
+must continue to use PostgreSQL as the authority.
+
+I would not cache available internal inventory as the source of truth because
+that would create another consistency problem around stock mutation.
+
+A cache becomes useful only if read traffic is demonstrated to dominate
+database load.
+
+## 14. Observability required before scaling
+
+Scaling decisions should be based on measured bottlenecks.
+
+Minimum production metrics:
+
+### API
+
+- request rate;
+- p50/p95/p99 latency;
+- error rate by endpoint.
+
+### Database
+
+- transaction latency;
+- lock wait time;
+- deadlocks;
+- connection usage;
+- slow work-claim queries;
+- vacuum/index growth.
+
+### Reservation lifecycle
+
+- count by reservation status;
+- age of oldest `RESERVING`;
+- age of oldest `RELEASING`;
+- expiry lag.
+
+### Provider workflow
+
+- reserve/release/lookup latency;
+- provider errors and timeouts;
+- pending/unknown backlog by provider;
+- lease recoveries;
+- reconciliation age.
+
+These measurements determine whether the next investment belongs in the
+database, worker pool, provider isolation, or message infrastructure.
+
+## 15. Scale-out order
+
+I would evolve the system in this order:
+
+1. measure latency, locks, provider queue age, and connection pressure;
+2. tune SQL indexes, transaction duration, and connection pools;
+3. tune worker batch size/concurrency per provider;
+4. add provider-specific rate limiting and circuit breaking;
+5. archive terminal data and add partial active-work indexes;
+6. add a transactional outbox and broker only when database polling is a
+   measured bottleneck or events need multiple consumers;
+7. partition/shard inventory only when hot-row contention or data volume proves
+   it is necessary.
+
+This order preserves the current correctness model and adds complexity only
+when there is evidence that the simpler design is no longer sufficient.
