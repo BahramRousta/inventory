@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     external_provider_id: UUID | None = None
     external_provider_base_url: str | None = None
+    external_provider_api_key: str | None = None
     external_provider_hold_timeout_seconds: float = 2.0
 
     provider_worker_poll_interval_seconds: float = Field(default=1.0, gt=0)
