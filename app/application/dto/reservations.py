@@ -1,9 +1,13 @@
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from app.domain.enums import ProviderKind, ReservationLineStatus, ReservationStatus
+from app.domain.enums import (
+    PaymentOutcome,
+    ProviderKind,
+    ReservationLineStatus,
+    ReservationStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,14 @@ class CreateReservationCommand:
 
 
 @dataclass(frozen=True)
+class PaymentOutcomeCommand:
+    event_id: UUID
+    reservation_id: UUID
+    user_id: str
+    outcome: PaymentOutcome
+
+
+@dataclass(frozen=True)
 class StockSourceRecord:
     stock_source_id: UUID
     product_id: UUID
@@ -28,7 +40,23 @@ class StockSourceRecord:
     provider_kind: ProviderKind
     provider_enabled: bool
     source_enabled: bool
-    reservation_supported: bool
+    supports_check: bool
+    supports_hold: bool
+    supports_release: bool
+    supports_get_hold: bool
+    hold_is_final_allocation: bool
+    credential_ref: str | None
+
+    @property
+    def reservation_supported(self) -> bool:
+        if self.provider_kind == ProviderKind.INTERNAL:
+            return True
+        return (
+            self.supports_hold
+            and self.supports_release
+            and self.supports_get_hold
+            and self.hold_is_final_allocation
+        )
 
 
 @dataclass(frozen=True)
@@ -36,7 +64,9 @@ class ReservationIdentityRecord:
     reservation_id: UUID
     user_id: str
     idempotency_key: str
+    request_fingerprint: str | None
     status: ReservationStatus
+    created_at: datetime
     expires_at: datetime
 
 
@@ -91,12 +121,33 @@ class PendingExternalReleaseRecord:
 
 
 @dataclass(frozen=True)
+class OrderLineRecord:
+    product_id: UUID
+    stock_source_id: UUID
+    provider_id: UUID
+    quantity: int
+    provider_allocation_ref: str | None = None
+
+
+@dataclass(frozen=True)
+class PaymentEventRecord:
+    event_id: UUID
+    reservation_id: UUID
+    user_id: str
+    outcome: PaymentOutcome
+    payload_hash: str
+
+
+@dataclass(frozen=True)
 class CreateReservationResult:
     reservation_id: UUID
     status: ReservationStatus
+    created_at: datetime
     expires_at: datetime
     payment_allowed: bool
+    requires_attention: bool
     lines: tuple[ReservationLineResult, ...]
+    replayed: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,6 +155,20 @@ class ConfirmReservationResult:
     reservation_id: UUID
     order_id: UUID
     status: ReservationStatus
+    created_at: datetime
     expires_at: datetime
     payment_allowed: bool
+    requires_attention: bool
+    lines: tuple[ReservationLineResult, ...]
+
+
+@dataclass(frozen=True)
+class PaymentOutcomeResult:
+    reservation_id: UUID
+    order_id: UUID | None
+    status: ReservationStatus
+    created_at: datetime
+    expires_at: datetime
+    payment_allowed: bool
+    requires_attention: bool
     lines: tuple[ReservationLineResult, ...]
