@@ -9,6 +9,7 @@ from app.application.dto.reservations import (
     ReservationLineResult,
 )
 from app.application.errors import (
+    IdempotencyConflict,
     InsufficientStock,
     PersistenceConflict,
     ProductSourceMismatch,
@@ -39,26 +40,18 @@ class CreateReservationService:
         self._provider_gateways = provider_gateways or InMemoryProviderGatewayRegistry()
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
-        """
-        1- check idempotency and avoid duplication
-        2- validate product belong to the sources
-        3- create reservation row
-        4- hold internal lines and persist external lines as pending
-        5- activate only when every line is internally held
-        6- return the persisted reservation state
-        :param command:
-        :return:
-        """
         try:
             async with self._uow_factory() as uow:
                 existing = await uow.reservations.get_by_idempotency_key(
                     command.user_id, command.idempotency_key
                 )
                 if existing is not None:
-                    return await self._return_or_reject_idempotent_replay(
+                    return self._return_or_reject_idempotent_replay(
                         existing.reservation_id,
-                        existing.status, existing.expires_at,
-                        await uow.reservations.get_lines(existing.reservation_id)
+                        existing.status,
+                        existing.expires_at,
+                        await uow.reservations.get_lines(existing.reservation_id),
+                        command.items,
                     )
 
                 sources = await uow.stock_sources.get_many(
@@ -122,20 +115,42 @@ class CreateReservationService:
                 )
                 if existing is None:
                     raise
-                return await self._return_or_reject_idempotent_replay(
+                return self._return_or_reject_idempotent_replay(
                     existing.reservation_id,
                     existing.status,
                     existing.expires_at,
-                    lines=await retry_uow.reservations.get_lines(existing.reservation_id)
+                    await retry_uow.reservations.get_lines(existing.reservation_id),
+                    command.items,
                 )
 
-    async def _return_or_reject_idempotent_replay(
+    def _return_or_reject_idempotent_replay(
         self,
         reservation_id: UUID,
         status: ReservationStatus,
         expires_at,
-            lines: tuple[ReservationLineResult, ...]
+        lines: tuple[ReservationLineResult, ...],
+        requested_items: tuple[ReservationItemCommand, ...],
     ) -> CreateReservationResult:
+        persisted = sorted(
+            (
+                line.product_id,
+                line.stock_source_id,
+                line.quantity,
+            )
+            for line in lines
+        )
+        requested = sorted(
+            (
+                item.product_id,
+                item.stock_source_id,
+                item.quantity,
+            )
+            for item in requested_items
+        )
+        if persisted != requested:
+            raise IdempotencyConflict(
+                "The idempotency key was already used with a different request payload."
+            )
         return CreateReservationResult(
             reservation_id=reservation_id,
             status=status,
