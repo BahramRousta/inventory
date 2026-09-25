@@ -2,7 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.infrastructure.db.repositories.inventory import SqlAlchemyInternalInventoryRepository
 from app.infrastructure.db.repositories.orders import SqlAlchemyOrderRepository
-from app.infrastructure.db.repositories.reservations import SqlAlchemyReservationRepository
+from app.infrastructure.db.repositories.reservation_lifecycle import (
+    SqlAlchemyLifecycleReservationRepository,
+)
 from app.infrastructure.db.repositories.stock_sources import SqlAlchemyStockSourceRepository
 
 
@@ -14,7 +16,7 @@ class SqlAlchemyUnitOfWork:
     async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
         self.session = self._session_factory()
         self.stock_sources = SqlAlchemyStockSourceRepository(self.session)
-        self.reservations = SqlAlchemyReservationRepository(self.session)
+        self.reservations = SqlAlchemyLifecycleReservationRepository(self.session)
         self.inventory = SqlAlchemyInternalInventoryRepository(self.session)
         self.orders = SqlAlchemyOrderRepository(self.session)
         return self
