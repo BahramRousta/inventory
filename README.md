@@ -11,15 +11,15 @@ during checkout.
 - reconciliation of ambiguous provider outcomes;
 - TTL expiry and truthful `EXPIRED` vs `CANCELLED` terminal semantics;
 - required `Idempotency-Key` request header with body fingerprint checking;
-- trusted payment-outcome orchestration;
 - final order creation linked to the reservation;
-- capability-specific provider ports: query-only providers are distinct from
-  reservation-capable providers;
+- one provider port with a single `reserve(...)` operation; each provider
+  hides whether it uses an availability query or a real reservation/HOLD API;
 - simple configurable mock provider outcomes for interview/demo scenarios;
 - independent hold, release, reconciliation and expiry worker processes.
 
-The configured demo provider uses **HOLD is final allocation** semantics. There
-is no remote provider-confirm call.
+Provider-specific mechanics are hidden behind `InventoryProvider.reserve()`.
+A query-style provider can implement it with an availability check, while a
+reservation-style provider can implement it with HOLD semantics.
 
 ## Run
 
@@ -41,10 +41,9 @@ The seeded external provider ID is:
 11111111-1111-1111-1111-111111111111
 ```
 
-Compose configures every provider worker with that same provider ID. The
-factory selects a reservation-capable mock gateway for that ID. Query-only
-providers use a separate availability interface and cannot enter the
-reservation workflow.
+Compose configures every provider worker with that same provider ID. The factory selects the configured provider implementation for that ID.
+Create flow only validates that the provider/source are enabled; the worker
+loads the provider later and calls the same `reserve()` contract.
 
 ## Create a reservation
 
@@ -81,32 +80,23 @@ curl -H 'X-User-Id: user-123' \
 The snapshot includes `created_at`, `expires_at`, `payment_allowed`,
 `requires_attention`, and every line state.
 
-## Submit payment outcome
+## Confirm a reservation
 
-Payment processing is outside this service. Submit only the trusted outcome:
+Payment processing is outside this service. After checkout/payment succeeds,
+the caller confirms the reservation:
 
 ```bash
 curl -i -X POST \
-  http://localhost:8000/reservations/<reservation-id>/payment-outcome \
-  -H 'Content-Type: application/json' \
   -H 'X-User-Id: user-123' \
-  -d '{
-    "event_id": "<unique-event-uuid>",
-    "outcome": "SUCCESS"
-  }'
+  http://localhost:8000/reservations/<reservation-id>/confirm
 ```
 
-`SUCCESS` conditionally claims `ACTIVE -> CONFIRMING` before expiry,
-consumes internal held stock, finalizes eligible external allocations, and
-creates one immutable order with lines.
-
-`FAILURE` moves an eligible reservation into `RELEASING`; compensation is
-completed by the release/reconciliation workers.
-
-The event ID is idempotent. Reusing the event ID with different content is a
-conflict.
+Confirmation consumes held internal inventory, marks reservation lines
+confirmed, and creates the final order.
 
 ## Cancel
+
+If checkout fails or is abandoned, the caller cancels the reservation:
 
 ```bash
 curl -i -X POST \
@@ -114,12 +104,8 @@ curl -i -X POST \
   http://localhost:8000/reservations/<reservation-id>/cancel
 ```
 
-Cancellation is asynchronous when external releases are required.
-
-## Administrative direct confirm
-
-`POST /reservations/{id}/confirm` remains only as a deprecated administrative
-compatibility endpoint. Checkout should use the payment-outcome endpoint.
+Cancellation is asynchronous when external releases are required. Uncancelled
+reservations are also released by TTL expiry.
 
 ## Mock provider scenarios
 
@@ -175,9 +161,9 @@ pytest -m postgres tests/e2e tests/integration
 The E2E fixture creates and drops the schema for each test, so
 `TEST_DATABASE_URL` **must point to a disposable test database**.
 
-Coverage includes API create/read/cancel/payment/direct-confirm behavior,
+Coverage includes API create/read/confirm/cancel behavior,
 idempotency and changed-body conflict, duplicate-line canonicalization,
 insufficient stock rollback, owner checks, expiry, immutable reservation lines,
 final-unit concurrency, provider HOLD success/decline/unknown outcomes,
 reconciliation, provider RELEASE, mixed-source compensation, SKIP LOCKED work
-claims, stale-lease recovery, and payment/expiry transition coordination.
+claims, stale-lease recovery, and expiry/confirmation transition behavior.

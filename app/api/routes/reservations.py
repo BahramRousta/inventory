@@ -6,25 +6,20 @@ from app.api.schemas.reservations import (
     ConfirmReservationResponse,
     CreateReservationRequest,
     CreateReservationResponse,
-    PaymentOutcomeRequest,
-    PaymentOutcomeResponse,
     ReservationResponse,
 )
 from app.application.dto.reservations import (
     CreateReservationCommand,
-    PaymentOutcomeCommand,
     ReservationItemCommand,
 )
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
 from app.application.services.get_reservation import GetReservationService
-from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
 from app.bootstrap.dependencies import (
     get_cancel_reservation_service,
     get_confirm_reservation_service,
     get_create_reservation_service,
-    get_payment_outcome_service,
     get_reservation_service,
 )
 from app.domain.enums import ReservationStatus
@@ -99,49 +94,14 @@ async def get_reservation(
     user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: GetReservationService = Depends(get_reservation_service),
 ) -> ReservationResponse:
-    return _reservation_response(await service.execute(reservation_id, user_id=user_id))
-
-
-@router.post(
-    "/{reservation_id}/payment-outcome",
-    response_model=PaymentOutcomeResponse,
-)
-async def process_payment_outcome(
-    reservation_id: UUID,
-    body: PaymentOutcomeRequest,
-    response: Response,
-    user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
-    service: ProcessPaymentOutcomeService = Depends(get_payment_outcome_service),
-) -> PaymentOutcomeResponse:
-    result = await service.execute(
-        PaymentOutcomeCommand(
-            event_id=body.event_id,
-            reservation_id=reservation_id,
-            user_id=user_id,
-            outcome=body.outcome,
-        )
-    )
-    if result.status == ReservationStatus.RELEASING:
-        response.status_code = status.HTTP_202_ACCEPTED
-        response.headers["Retry-After"] = "1"
-    else:
-        response.status_code = status.HTTP_200_OK
-
-    base = _reservation_response(result)
-    return PaymentOutcomeResponse(
-        **base.model_dump(),
-        order_id=result.order_id,
+    return _reservation_response(
+        await service.execute(reservation_id, user_id=user_id)
     )
 
 
 @router.post(
     "/{reservation_id}/confirm",
     response_model=ConfirmReservationResponse,
-    deprecated=True,
-    description=(
-        "Administrative compatibility endpoint. Checkout should submit a trusted "
-        "payment outcome instead."
-    ),
 )
 async def confirm_reservation(
     reservation_id: UUID,

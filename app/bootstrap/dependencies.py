@@ -6,7 +6,6 @@ from app.application.services.get_reservation import GetReservationService
 from app.application.services.process_claimed_provider_release import (
     ProcessClaimedProviderReleaseService,
 )
-from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
 from app.application.services.process_pending_provider_hold import (
     ProcessPendingProviderHoldService,
 )
@@ -73,7 +72,3 @@ def get_confirm_reservation_service() -> ConfirmReservationService:
 
 def get_cancel_reservation_service() -> CancelReservationService:
     return CancelReservationService(uow_factory=_uow_factory)
-
-
-def get_payment_outcome_service() -> ProcessPaymentOutcomeService:
-    return ProcessPaymentOutcomeService(uow_factory=_uow_factory)

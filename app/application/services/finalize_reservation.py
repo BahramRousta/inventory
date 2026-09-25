@@ -30,11 +30,6 @@ async def finalize_confirming_reservation(
                 raise ReservationStateConflict(
                     f"Internal hold for {line.stock_source_id} cannot be consumed."
                 )
-        else:
-            # External reservation details are hidden behind InventoryProvider.
-            # A HELD line means the provider accepted reserve() successfully.
-            pass
-
         await uow.reservations.mark_line_confirmed(reservation_id, line.stock_source_id)
 
     if not await uow.reservations.confirm_if_all_lines_confirmed(reservation_id):

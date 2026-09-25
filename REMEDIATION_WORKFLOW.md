@@ -8,14 +8,16 @@ This branch implements Steps 1–8 and Step 10.
 - Step 2: complete — release reason determines EXPIRED vs CANCELLED.
 - Step 3: complete — HTTP contract uses trusted user/idempotency headers,
   canonical request fingerprints, snapshot metadata, Location and retry hints.
-- Step 4: complete — trusted, idempotent payment outcomes orchestrate success
-  and failure transitions.
+- Step 4: simplified — payment processing remains outside this inventory
+  service. Successful checkout calls `confirm`; failed/abandoned checkout uses
+  `cancel` or TTL expiry.
 - Step 5: complete — reservation-capable providers explicitly expose
   **HOLD is final allocation** through the reservation provider interface.
 - Step 6: complete — orders persist immutable reservation lines.
-- Step 7: complete — provider operations are represented by separate
-  capability-specific ports. Query-only providers cannot be selected for
-  reservation work.
+- Step 7: complete — provider-specific mechanics are hidden behind one
+  `InventoryProvider.reserve(...)` contract; query-style and hold-style
+  providers are selected by the factory but processed identically by the
+  application worker.
 - Step 8: simplified for interview scope — Compose runs separate workers while
   provider behavior is represented by deterministic mock gateways rather than a
   production-style HTTP provider implementation.
@@ -40,13 +42,13 @@ changed.
 ## Completion definition
 
 The assignment is complete only when a trusted caller can create a
-source-specific reservation, observe its state, submit an idempotent payment
-outcome, and eventually get exactly one truthful terminal result:
+source-specific reservation, observe its state, confirm it after successful
+checkout, or cancel/expire it when checkout does not complete:
 
-- successful payment consumes internal stock, commits each required external
-  allocation, and creates one immutable local order with lines;
-- failed payment, explicit cancellation, or TTL expiry releases local and
-  external holds exactly once where the provider outcome is known;
+- confirmation consumes internal stock, finalizes reservation state, and
+  creates one local order;
+- explicit cancellation or TTL expiry releases local and external holds exactly
+  once where the provider outcome is known;
 - unknown provider outcomes remain visible and reconcilable rather than being
   reported as success or release;
 - provider calls happen outside database transactions and worker claims use
@@ -113,8 +115,8 @@ assumptions.
    pending work, and `200` for settled idempotent replay. Include `Location`;
    include a retry hint for pending work.
 6. Use the documented error envelope consistently.
-7. Require the trusted verified user identity for read, cancel, payment, and
-   any direct confirmation operation; it must match the reservation owner.
+7. Require the trusted verified user identity for read, cancel, and confirm;
+   it must match the reservation owner.
 
 **Assumption:** authentication remains out of scope. The trusted caller still
 supplies verified user identity at this service boundary.
@@ -122,30 +124,24 @@ supplies verified user identity at this service boundary.
 **Done when:** schemas, routes, application DTOs, and OpenAPI describe one
 identical contract.
 
-## Step 4 — Add trusted payment-outcome orchestration
+## Step 4 — Keep payment outside the inventory service
 
-**Goal:** replace direct checkout finalization as the primary flow with a
-trusted payment result.
+**Goal:** keep the service boundary focused on reservation lifecycle.
 
 **Implementation:**
 
-1. Add a payment outcome input with `event_id`, `reservation_id`, verified
-   user, and `SUCCESS` or `FAILURE`.
-2. Keep payment processing outside this service; apply trusted outcomes through
-   idempotent reservation state transitions and the unique order-per-reservation
-   constraint.
-3. On eligible `SUCCESS`, atomically claim `ACTIVE -> CONFIRMING` only before
-   expiry according to database time.
-4. On `FAILURE`, atomically claim `RESERVING|ACTIVE -> RELEASING`.
-5. Keep late or contradictory events truthful: they must not resurrect an
-   expired/released reservation or silently undo a confirmation.
+1. Do not expose a payment-specific endpoint.
+2. After payment succeeds outside this service, the caller invokes
+   `POST /reservations/{id}/confirm`.
+3. If checkout fails or is abandoned, the caller invokes cancel or the
+   reservation expires through TTL.
+4. Keep confirmation idempotent and race-safe with expiration.
 
-**Assumption:** payment processing itself remains outside this service; this
-endpoint/event consumes a trusted outcome only.
+**Assumption:** payment systems and checkout orchestration are outside this
+service boundary.
 
-**Done when:** payment-vs-expiry has a single database transition winner and
-the direct confirm endpoint is either removed, clearly administrative, or
-delegates to the same application flow.
+**Done when:** the public lifecycle is create, get, confirm, cancel, plus
+automatic expiration.
 
 ## Step 5 — Define the external final-commit contract
 
@@ -204,11 +200,9 @@ remain the item/source detail for the assignment.
 
 **Implementation:**
 
-1. Resolve whether a provider supports query, hold, release, status lookup,
-   and either commit or final-allocation hold semantics from its configured
-   adapter.
-2. Reject query-only and otherwise insufficient providers before creating a
-   guaranteed checkout reservation.
+1. Keep provider-specific query/HOLD behavior behind the provider adapter.
+2. Create flow validates enabled provider/source state only; provider execution
+   later calls the common `reserve(...)` operation.
 3. Keep provider selection/configuration in the factory; do not persist
    provider behavior flags in PostgreSQL.
 4. A production HTTP/authentication adapter is intentionally outside this
@@ -253,7 +247,7 @@ tests can deterministically drive success, decline, and reconciliation paths.
    outcome, release, and reconciliation using configurable mocks.
 4. Worker claim/lease tests proving `FOR UPDATE SKIP LOCKED`, stale-lease
    recovery, and no duplicate local state transition.
-5. Payment-vs-expiry and duplicate/contradictory payment-outcome tests.
+5. Confirmation-vs-expiry and duplicate-confirmation tests.
 
 Mock only the provider boundary where an actual fake HTTP provider is not the
 specific behavior under demonstration. Database assertions must use real
@@ -283,7 +277,7 @@ implemented public behavior is missing from the submission guide.
 1 wiring
 2 terminal semantics
 3 HTTP contract
-4 payment outcome
+4 inventory-service boundary
 5 provider final commit decision + implementation
 6 immutable orders
 7 provider capabilities/config

@@ -9,18 +9,15 @@ from sqlalchemy import func, select
 
 from app.application.ports.provider_gateway import (
     ProviderRegistry,
-    ProviderRegistryProtocol,
 )
 from app.application.services.cancel_reservation import CancelReservationService
 from app.application.services.confirm_reservation import ConfirmReservationService
 from app.application.services.create_reservation import CreateReservationService
 from app.application.services.get_reservation import GetReservationService
-from app.application.services.process_payment_outcome import ProcessPaymentOutcomeService
 from app.bootstrap.dependencies import (
     get_cancel_reservation_service,
     get_confirm_reservation_service,
     get_create_reservation_service,
-    get_payment_outcome_service,
     get_reservation_service,
 )
 from app.infrastructure.clock import SystemClock
@@ -122,10 +119,8 @@ def uow_factory(factory):
 def install_api_overrides(
     factory,
     *,
-    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ) -> None:
-    registry = providers or ProviderRegistry()
     make_uow = uow_factory(factory)
 
     app.dependency_overrides[get_create_reservation_service] = lambda: CreateReservationService(
@@ -142,21 +137,16 @@ def install_api_overrides(
     app.dependency_overrides[get_confirm_reservation_service] = lambda: ConfirmReservationService(
         uow_factory=make_uow,
     )
-    app.dependency_overrides[get_payment_outcome_service] = lambda: ProcessPaymentOutcomeService(
-        uow_factory=make_uow,
-    )
 
 
 @asynccontextmanager
 async def api_client(
     factory,
     *,
-    providers: ProviderRegistryProtocol | None = None,
     ttl_seconds: int = 900,
 ):
     install_api_overrides(
         factory,
-        providers=providers,
         ttl_seconds=ttl_seconds,
     )
     try:

@@ -7,8 +7,9 @@ reservation state, internal inventory holds, the local order record, and durable
 workflow state for external inventory providers.
 
 Authentication and payment processing are outside the service. A trusted caller
-supplies the verified user identity through `X-User-Id`, and payment systems
-submit only the final trusted payment outcome.
+supplies the verified user identity through `X-User-Id`. After payment succeeds
+outside this service, the caller invokes the reservation confirm endpoint; on
+failure or abandonment it invokes cancel or lets the reservation expire.
 
 ## Architectural style
 
@@ -44,43 +45,31 @@ The assignment demo chooses this explicit provider contract:
 
 **A successful HOLD is the final external allocation.**
 
-There is no remote CONFIRM operation. The application asks the registry for a
-`ReservationProviderGateway`. Query-only providers implement the separate
-`AvailabilityProviderGateway` interface and therefore cannot be selected for
-reservation work.
+The application owns one provider port: `InventoryProvider`. The worker loads
+a provider by ID and calls `reserve(...)`; the concrete provider decides how
+that operation is implemented. A query-style provider may check availability,
+while a reservation-style provider may perform a HOLD. The application service
+does not branch on those provider details.
 
-The reservation gateway contract consists of HOLD, RELEASE, and GET_HOLD plus
-the explicit `hold_is_final_allocation` semantic. The interview implementation
-uses a configurable mock gateway that returns deterministic results; a real
-HTTP adapter is intentionally not implemented.
+The same provider abstraction also exposes release/status operations needed by
+compensation and reconciliation. The interview implementation uses simple mock
+providers rather than real HTTP integrations.
 
-## Payment and confirmation
+## Confirmation
 
-Checkout finalization is driven by
-`POST /reservations/{id}/payment-outcome`.
+Checkout/payment handling is outside this service. The reservation API exposes
+`POST /reservations/{id}/confirm` as the success transition.
 
-A payment outcome contains a globally unique `event_id` and either `SUCCESS`
-or `FAILURE`. Its payload hash is stored so duplicate delivery is harmless,
-while reuse of the event ID with different content is a conflict.
+Confirmation conditionally transitions `ACTIVE -> CONFIRMING` before expiry,
+consumes internal held stock, marks all reservation lines `CONFIRMED`, and
+creates exactly one local order.
 
-On success, PostgreSQL conditionally transitions `ACTIVE -> CONFIRMING` only
-when the reservation has not expired. This database transition races safely
-with expiry. Internal held stock is consumed, external lines are accepted only
-for providers whose HOLD is declared final allocation, every line is marked
-`CONFIRMED`, and one final order is inserted in the same
-local transaction.
-
-On payment failure, `RESERVING|ACTIVE -> RELEASING` is claimed atomically and
-the normal compensation workflow is used.
-
-The legacy direct confirm endpoint remains only as a deprecated administrative
-compatibility endpoint. It requires the same verified user identity and uses
-the same finalization helper as payment success.
+Failure/abandonment is represented through the existing cancel and TTL-expiry
+paths; there is no payment-specific API or payment domain model.
 
 ## Compensation and terminal truth
 
-A reservation enters `RELEASING` for creation failure, payment failure, user
-cancellation or TTL expiry.
+A reservation enters `RELEASING` for creation failure, user cancellation, or TTL expiry.
 
 Internal holds are released transactionally. Known external holds become
 `RELEASE_PENDING` and are released asynchronously. Ambiguous external

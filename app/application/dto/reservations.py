@@ -3,7 +3,6 @@ from datetime import datetime
 from uuid import UUID
 
 from app.domain.enums import (
-    PaymentOutcome,
     ProviderKind,
     ReservationLineStatus,
     ReservationStatus,
@@ -23,13 +22,6 @@ class CreateReservationCommand:
     idempotency_key: str
     items: tuple[ReservationItemCommand, ...]
 
-
-@dataclass(frozen=True)
-class PaymentOutcomeCommand:
-    event_id: UUID
-    reservation_id: UUID
-    user_id: str
-    outcome: PaymentOutcome
 
 
 @dataclass(frozen=True)
@@ -102,14 +94,3 @@ class ConfirmReservationResult:
     requires_attention: bool
     lines: tuple[ReservationLineResult, ...]
 
-
-@dataclass(frozen=True)
-class PaymentOutcomeResult:
-    reservation_id: UUID
-    order_id: UUID | None
-    status: ReservationStatus
-    created_at: datetime
-    expires_at: datetime
-    payment_allowed: bool
-    requires_attention: bool
-    lines: tuple[ReservationLineResult, ...]
