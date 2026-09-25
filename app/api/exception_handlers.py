@@ -7,6 +7,9 @@ from app.application.errors import (
     InsufficientStock,
     InvalidReservationItems,
     ProductSourceMismatch,
+    ReservationExpired,
+    ReservationNotFound,
+    ReservationStateConflict,
     SourceDisabled,
     SourceNotReservable,
 )
@@ -19,6 +22,9 @@ ERROR_STATUS = {
     SourceNotReservable: 422,
     InsufficientStock: 409,
     IdempotencyConflict: 409,
+    ReservationNotFound: 404,
+    ReservationStateConflict: 409,
+    ReservationExpired: 409,
 }
 
 
