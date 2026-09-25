@@ -129,14 +129,14 @@ Definitive decline:
 curl -X POST http://localhost:9000/admin/mode/decline
 ```
 
-Timeout after the provider has already created the hold:
+Timeout after the provider has already applied a HOLD or RELEASE side effect:
 
 ```bash
 curl -X POST http://localhost:9000/admin/mode/timeout_after_side_effect
 ```
 
-The latter intentionally creates an ambiguous local result; the reconciliation
-worker later discovers the provider-side hold through GET_HOLD.
+The latter intentionally creates an ambiguous local result; reconciliation
+later discovers whether the provider-side hold still exists through GET_HOLD.
 
 Restore normal behavior:
 
