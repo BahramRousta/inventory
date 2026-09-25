@@ -13,7 +13,7 @@ during checkout.
 - required `Idempotency-Key` request header with body fingerprint checking;
 - trusted payment-outcome orchestration;
 - immutable orders with order lines;
-- persisted provider capability/configuration metadata;
+- provider capabilities declared by adapters and runtime configuration injected from environment;
 - standalone fake HTTP provider with success, decline and
   timeout-after-side-effect scenarios;
 - independent hold, release, reconciliation and expiry worker processes.
@@ -42,7 +42,9 @@ The seeded external provider ID is:
 ```
 
 Compose configures every provider worker with that same ID and with
-`http://fake-provider:9000`.
+`http://fake-provider:9000`. Provider endpoints, credentials, and timeouts are
+environment-backed settings; provider operation capabilities are declared by
+the adapter implementation, not stored in PostgreSQL.
 
 ## Create a reservation
 
@@ -158,7 +160,11 @@ Compose runs:
 - PostgreSQL.
 
 Worker batch size, concurrency, lease length and polling interval are
-configuration values. Defaults are documented in `SCALABILITY.md`.
+configuration values. Provider runtime configuration is supplied with
+`EXTERNAL_PROVIDER_ID`, `EXTERNAL_PROVIDER_BASE_URL`,
+`EXTERNAL_PROVIDER_API_KEY` (when required), and timeout settings. CI/CD or a
+secret manager should inject secret values. Defaults are documented in
+`SCALABILITY.md`.
 
 ## Design documents
 
