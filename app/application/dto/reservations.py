@@ -40,24 +40,6 @@ class StockSourceRecord:
     provider_kind: ProviderKind
     provider_enabled: bool
     source_enabled: bool
-    supports_check: bool
-    supports_hold: bool
-    supports_release: bool
-    supports_get_hold: bool
-    hold_is_final_allocation: bool
-    credential_ref: str | None
-
-    @property
-    def reservation_supported(self) -> bool:
-        if self.provider_kind == ProviderKind.INTERNAL:
-            return True
-        return (
-            self.supports_hold
-            and self.supports_release
-            and self.supports_get_hold
-            and self.hold_is_final_allocation
-        )
-
 
 @dataclass(frozen=True)
 class ReservationIdentityRecord:
