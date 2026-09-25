@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, exists, func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
