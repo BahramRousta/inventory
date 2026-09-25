@@ -2,7 +2,7 @@ from typing import Callable
 
 from app.application.dto.reservations import ClaimedExternalReleaseRecord
 from app.application.ports.provider_gateway import (
-    ProviderGatewayRegistry,
+    ProviderRegistryProtocol,
     ProviderReleaseOutcome,
     ProviderReleaseResult,
 )
@@ -18,7 +18,7 @@ class ProcessClaimedProviderReleaseService:
         provider_gateways: ProviderGatewayRegistry,
     ) -> None:
         self._uow_factory = uow_factory
-        self._provider_gateways = provider_gateways
+        self._providers = providers
 
     async def execute(self, work: ClaimedExternalReleaseRecord) -> bool:
         async with self._uow_factory() as uow:
@@ -26,8 +26,8 @@ class ProcessClaimedProviderReleaseService:
                 work.reservation_id, work.stock_source_id, work.claim_token
             ):
                 return False
-        gateway = self._provider_gateways.get_reservation_provider(work.provider_id)
-        result = await self._attempt(gateway, work)
+        provider = self._providers.get(work.provider_id)
+        result = await self._attempt(provider, work)
         status = (
             ReservationLineStatus.RELEASED
             if result.outcome == ProviderReleaseOutcome.RELEASED
@@ -46,13 +46,13 @@ class ProcessClaimedProviderReleaseService:
             return persisted
 
     @staticmethod
-    async def _attempt(gateway, work: ClaimedExternalReleaseRecord) -> ProviderReleaseResult:
-        if gateway is None:
+    async def _attempt(provider, work: ClaimedExternalReleaseRecord) -> ProviderReleaseResult:
+        if provider is None:
             return ProviderReleaseResult(ProviderReleaseOutcome.UNKNOWN)
         try:
-            return await gateway.release(
+            return await provider.release(
                 stock_source_id=work.stock_source_id,
-                external_hold_ref=work.external_hold_ref,
+                external_ref=work.external_hold_ref,
                 release_key=f"{work.reservation_id}:{work.stock_source_id}:RELEASE",
             )
         except Exception:
