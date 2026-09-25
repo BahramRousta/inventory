@@ -43,6 +43,7 @@ independent HTTP process.
 | Reconciliation | GET_HOLD resolves ambiguous hold to HELD/ACTIVE | `test_external_provider_postgres.py` |
 | Reconciliation | payment failure during HOLD_UNKNOWN discovers then releases the real remote hold | `test_external_provider_postgres.py` |
 | External RELEASE | cancel releases upstream hold and persists RELEASED | `test_external_provider_postgres.py` |
+| External RELEASE | timeout after remote release -> RELEASE_UNKNOWN -> reconciliation -> CANCELLED | `test_external_provider_postgres.py` |
 | Mixed sources | external decline compensates successful internal hold; no order | `test_external_provider_postgres.py` |
 | External finalization | successful HOLD is snapshotted as final allocation in order line | `test_external_provider_postgres.py` |
 | Pre-HOLD failure | payment failure before provider call terminates pending work without remote hold | `test_external_provider_postgres.py` |
