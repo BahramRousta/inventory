@@ -161,13 +161,17 @@ async def confirm_reservation(
 @router.post(
     "/{reservation_id}/cancel",
     response_model=ReservationResponse,
-    status_code=status.HTTP_202_ACCEPTED,
 )
 async def cancel_reservation(
     reservation_id: UUID,
+    response: Response,
     user_id: str = Header(..., alias="X-User-Id", min_length=1, max_length=160),
     service: CancelReservationService = Depends(get_cancel_reservation_service),
 ) -> ReservationResponse:
-    return _reservation_response(
-        await service.execute(reservation_id, user_id=user_id)
-    )
+    result = await service.execute(reservation_id, user_id=user_id)
+    if result.status == ReservationStatus.RELEASING:
+        response.status_code = status.HTTP_202_ACCEPTED
+        response.headers["Retry-After"] = "1"
+    else:
+        response.status_code = status.HTTP_200_OK
+    return _reservation_response(result)
