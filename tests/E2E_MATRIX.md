@@ -53,3 +53,5 @@ pytest -m postgres tests/e2e tests/integration
 
 The database must be disposable because the fixture creates and drops the full
 schema for isolation.
+| Create idempotency | same key + different payload returns `IDEMPOTENCY_CONFLICT` without changing persisted reservation/stock | `test_reservation_api_postgres.py` |
+| Create idempotency race | concurrent different payloads with same key persist one winner and conflict the other | `test_postgres_concurrency.py` |
