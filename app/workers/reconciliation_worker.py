@@ -10,6 +10,7 @@ from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 async def run_once() -> bool:
     settings = get_settings()
     async with SqlAlchemyUnitOfWork(AsyncSessionLocal) as uow:
+        # recovers if any worker in the middle of operation crashed before.
         recovered = await uow.reservations.recover_expired_provider_claims(
             limit=settings.provider_worker_batch_size
         )
