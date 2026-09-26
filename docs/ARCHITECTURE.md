@@ -438,6 +438,36 @@ UNKNOWN
 The line is only moved to a truthful terminal/intermediate state when the
 provider result is known.
 
+### Reconciliation retry policy
+
+The current implementation retries both reservation and release
+reconciliation, but the retry policy is intentionally simple:
+
+- `HOLD_UNKNOWN` and `RELEASE_UNKNOWN` are eligible on the next reconciliation
+  worker poll;
+- each worker claim gets a lease, so a crashed or stuck worker is recovered
+  after the lease expires and the line returns to its corresponding `UNKNOWN`
+  state;
+- an `UNKNOWN` provider lookup returns the line to `HOLD_UNKNOWN` or
+  `RELEASE_UNKNOWN`, so it can be attempted again later;
+- a release lookup that still reports `RESERVED` returns the line to
+  `RELEASE_PENDING` for another release attempt;
+- there is currently no attempt counter, exponential backoff, maximum retry
+  limit, or dead-letter/manual-review state.
+
+This policy retries only ambiguous work. A definitive hold decline becomes
+`FAILED`, and a definitive release result becomes `RELEASED`; neither is
+repeated as if it were an unknown outcome. The stable reservation/source
+operation key makes repeated provider inquiries and release attempts
+correlatable.
+
+The polling interval and lease provide crash recovery and limit concurrent
+duplicate processing, but they are not a full provider retry policy. In
+production, repeated `UNKNOWN` outcomes should gain bounded exponential
+backoff, an attempt limit, provider-specific retry classification, and a
+manual-reconciliation state so an unavailable provider cannot cause an
+unbounded hot retry loop.
+
 Expired worker leases are also recovered into an unknown state so a crashed
 worker does not silently lose remote work.
 
