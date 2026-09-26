@@ -620,3 +620,63 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     assert stock.held == 1
     assert order_count == 0
 
+async def test_same_idempotency_key_with_different_request_returns_conflict_without_mutation(
+    postgres_session_factory,
+):
+    """Scenario: an idempotency key is reused with a different request body.
+
+    Given an existing reservation created with quantity two,
+    When the same user reuses the same Idempotency-Key with quantity one,
+    Then the API returns IDEMPOTENCY_CONFLICT and PostgreSQL keeps only the
+    original reservation, line quantity, fingerprint, and held inventory.
+    """
+    # Given
+    source = await seed_internal_source(
+        postgres_session_factory,
+        sku="IDEMPOTENCY-FINGERPRINT",
+        on_hand=5,
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        first = await _create_internal(
+            client,
+            source,
+            key="fingerprint-key",
+            quantity=2,
+        )
+
+        # When
+        second = await _create_internal(
+            client,
+            source,
+            key="fingerprint-key",
+            quantity=1,
+        )
+
+    # Then
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["code"] == "IDEMPOTENCY_CONFLICT"
+
+    reservation_id = UUID(first.json()["reservation_id"])
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+        stock = await session.get(InternalStockModel, source.source_id)
+        reservations = await session.scalar(
+            select(func.count()).select_from(ReservationModel)
+        )
+
+    assert reservation is not None
+    assert len(reservation.request_fingerprint) == 64
+    assert reservation.request_fingerprint != "0" * 64
+    assert line is not None
+    assert line.quantity == 2
+    assert stock is not None
+    assert stock.on_hand == 5
+    assert stock.held == 2
+    assert reservations == 1
