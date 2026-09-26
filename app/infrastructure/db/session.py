@@ -1,6 +1,3 @@
-from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.bootstrap.config import get_settings
@@ -14,9 +11,3 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
-
-
-@asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession, Any]:
-    async with AsyncSessionLocal() as session:
-        yield session
