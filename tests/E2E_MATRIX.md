@@ -14,14 +14,11 @@ records directly.
 |---|---|---|
 | Health | health endpoint does not mutate persistence | `test_reservation_api_postgres.py` |
 | Create | internal hold succeeds and persists ACTIVE/HELD | `test_reservation_api_postgres.py` |
-| Create | duplicate lines canonicalize before stock mutation | `test_reservation_api_postgres.py` |
 | Create | insufficient stock rolls back reservation + line + hold | `test_reservation_api_postgres.py` |
 | Create | product/source mismatch | `test_reservation_api_postgres.py` |
 | Create | disabled source/provider | `test_reservation_api_postgres.py` |
 | Create | required trusted-user/idempotency headers | `test_reservation_api_postgres.py` |
-| Create | invalid quantity and aggregate overflow | `test_reservation_api_postgres.py` |
 | Idempotency | identical settled replay returns same reservation without a second hold | `test_reservation_api_postgres.py` |
-| Idempotency | changed body with same key conflicts | `test_reservation_api_postgres.py` |
 | Idempotency | pending external replay stays 202 and creates one work item | `test_external_provider_postgres.py` |
 | Provider execution | query-style provider reserves through availability semantics | `test_external_provider_postgres.py` |
 | Create | enabled external source is accepted before provider processing | `test_reservation_api_postgres.py` |

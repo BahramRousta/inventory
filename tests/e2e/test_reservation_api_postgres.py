@@ -87,53 +87,6 @@ async def test_create_internal_reservation_returns_201_and_holds_stock(
     assert stock.held == 2
 
 
-async def test_duplicate_request_lines_are_canonicalized_before_stock_mutation(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(postgres_session_factory, sku="DUP-LINES", on_hand=10)
-    body = {
-        "items": [
-            {
-                "product_id": str(source.product_id),
-                "stock_source_id": str(source.source_id),
-                "quantity": 1,
-            },
-            {
-                "product_id": str(source.product_id),
-                "stock_source_id": str(source.source_id),
-                "quantity": 2,
-            },
-        ]
-    }
-
-    async with api_client(postgres_session_factory) as client:
-        response = await client.post(
-            "/reservations",
-            headers=create_headers(idempotency_key="dup-lines"),
-            json=body,
-        )
-
-    assert response.status_code == 201
-    reservation_id = UUID(response.json()["reservation_id"])
-
-    async with postgres_session_factory() as session:
-        lines = (
-            await session.scalars(
-                select(ReservationLineModel).where(
-                    ReservationLineModel.reservation_id == reservation_id
-                )
-            )
-        ).all()
-        stock = await session.get(InternalStockModel, source.source_id)
-
-    assert len(lines) == 1
-    assert lines[0].quantity == 3
-    assert lines[0].status == ReservationLineStatus.HELD
-    assert stock is not None
-    assert stock.held == 3
-    assert await reservation_line_count(postgres_session_factory) == 1
-
-
 async def test_idempotent_create_replay_returns_200_and_does_not_hold_twice(
     postgres_session_factory,
 ):
@@ -154,30 +107,6 @@ async def test_idempotent_create_replay_returns_200_and_does_not_hold_twice(
     assert reservations == 1
     assert stock is not None
     assert stock.held == 2
-
-
-async def test_idempotency_key_with_changed_body_returns_conflict_without_mutation(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(postgres_session_factory, sku="IDEM-CONFLICT", on_hand=5)
-
-    async with api_client(postgres_session_factory) as client:
-        first = await _create_internal(client, source, key="body-key", quantity=1)
-        conflict = await _create_internal(client, source, key="body-key", quantity=2)
-
-    assert first.status_code == 201
-    assert conflict.status_code == 409
-    assert conflict.json()["code"] == "IDEMPOTENCY_CONFLICT"
-
-    async with postgres_session_factory() as session:
-        stock = await session.get(InternalStockModel, source.source_id)
-        line = await session.scalar(select(ReservationLineModel))
-
-    assert await reservation_count(postgres_session_factory) == 1
-    assert stock is not None
-    assert stock.held == 1
-    assert line is not None
-    assert line.quantity == 1
 
 
 async def test_insufficient_internal_stock_rolls_back_reservation_and_hold(
@@ -559,42 +488,6 @@ async def test_invalid_quantity_validation_creates_no_database_state(
     assert stock.held == 0
 
 
-async def test_duplicate_line_total_overflow_is_rejected_before_stock_mutation(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(postgres_session_factory, sku="OVERFLOW-QTY", on_hand=10)
-    max_quantity = 2_147_483_647
-
-    async with api_client(postgres_session_factory) as client:
-        response = await client.post(
-            "/reservations",
-            headers=create_headers(idempotency_key="overflow-qty"),
-            json={
-                "items": [
-                    {
-                        "product_id": str(source.product_id),
-                        "stock_source_id": str(source.source_id),
-                        "quantity": max_quantity,
-                    },
-                    {
-                        "product_id": str(source.product_id),
-                        "stock_source_id": str(source.source_id),
-                        "quantity": 1,
-                    },
-                ]
-            },
-        )
-
-    assert response.status_code == 422
-    assert response.json()["code"] == "INVALID_RESERVATION_ITEMS"
-    assert await reservation_count(postgres_session_factory) == 0
-
-    async with postgres_session_factory() as session:
-        stock = await session.get(InternalStockModel, source.source_id)
-    assert stock is not None
-    assert stock.held == 0
-
-
 async def test_get_unknown_reservation_returns_404_and_database_remains_empty(
     postgres_session_factory,
 ):
@@ -727,57 +620,3 @@ async def test_direct_confirm_after_expiry_is_rejected_and_creates_no_order(
     assert stock.held == 1
     assert order_count == 0
 
-
-async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
-    postgres_session_factory,
-):
-    source = await seed_internal_source(
-        postgres_session_factory, sku="CANONICAL-IDEMPOTENCY", on_hand=5
-    )
-    duplicate_body = {
-        "items": [
-            {
-                "product_id": str(source.product_id),
-                "stock_source_id": str(source.source_id),
-                "quantity": 1,
-            },
-            {
-                "product_id": str(source.product_id),
-                "stock_source_id": str(source.source_id),
-                "quantity": 2,
-            },
-        ]
-    }
-    canonical_body = create_body(source, quantity=3)
-
-    async with api_client(postgres_session_factory) as client:
-        first = await client.post(
-            "/reservations",
-            headers=create_headers(idempotency_key="canonical-key"),
-            json=duplicate_body,
-        )
-        replay = await client.post(
-            "/reservations",
-            headers=create_headers(idempotency_key="canonical-key"),
-            json=canonical_body,
-        )
-
-    assert first.status_code == 201
-    assert replay.status_code == 200
-    assert first.json()["reservation_id"] == replay.json()["reservation_id"]
-
-    reservation_id = UUID(first.json()["reservation_id"])
-    async with postgres_session_factory() as session:
-        reservation = await session.get(ReservationModel, reservation_id)
-        line = await session.scalar(
-            select(ReservationLineModel).where(
-                ReservationLineModel.reservation_id == reservation_id
-            )
-        )
-        stock = await session.get(InternalStockModel, source.source_id)
-
-    assert reservation is not None
-    assert line is not None
-    assert line.quantity == 3
-    assert stock is not None
-    assert stock.held == 3

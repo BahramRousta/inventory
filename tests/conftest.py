@@ -86,6 +86,7 @@ class SeedInventory:
                     enabled=source_enabled,
                 )
             )
+            await session.flush()
             session.add(InternalStockModel(stock_source_id=source_id, on_hand=on_hand, held=0))
         return SeededSource(product_id, provider_id, source_id)
 
@@ -154,6 +155,7 @@ class SeedInventory:
                     expires_at=expires_at,
                 )
             )
+            await session.flush()
             session.add(
                 ReservationLineModel(
                     reservation_id=reservation_id,
@@ -193,7 +195,6 @@ def seed_inventory(postgres_session_factory) -> SeedInventory:
     return SeedInventory(postgres_session_factory)
 
 
-@pytest.fixture
 def uow_factory(postgres_session_factory):
     return lambda: SqlAlchemyUnitOfWork(postgres_session_factory)
 
