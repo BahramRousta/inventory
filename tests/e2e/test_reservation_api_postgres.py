@@ -4,9 +4,6 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, update
 
-from app.application.services.expiry.expire_reserving_reservation import (
-    ExpireReservingReservationService,
-)
 from app.application.services.cancel.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
@@ -17,11 +14,10 @@ from app.domain.enums import (
 from app.infrastructure.db.models import (
     InternalStockModel,
     OrderModel,
-    ProductModel,
     ReservationLineModel,
     ReservationModel,
 )
-from tests.e2e.support import (
+from tests.conftest import (
     api_client,
     create_body,
     create_headers,
@@ -29,6 +25,7 @@ from tests.e2e.support import (
     reservation_line_count,
     seed_external_source,
     seed_internal_source,
+    seed_product,
     uow_factory,
 )
 
@@ -208,15 +205,10 @@ async def test_product_source_mismatch_returns_422_without_database_mutation(
     postgres_session_factory,
 ):
     source = await seed_internal_source(postgres_session_factory, sku="MISMATCH", on_hand=5)
-    wrong_product_id = uuid4()
-    async with postgres_session_factory.begin() as session:
-        session.add(
-            ProductModel(
-                id=wrong_product_id,
-                sku="WRONG-PRODUCT",
-                name="Wrong product",
-            )
-        )
+    wrong_product_id = await seed_product(
+        postgres_session_factory,
+        sku="WRONG-PRODUCT",
+    )
 
     async with api_client(postgres_session_factory) as client:
         response = await client.post(
@@ -789,5 +781,3 @@ async def test_idempotency_fingerprint_uses_canonicalized_duplicate_lines(
     assert line.quantity == 3
     assert stock is not None
     assert stock.held == 3
-
-

@@ -5,30 +5,23 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select
 
-from app.application.services.expiry.expire_reserving_reservation import (
-    ExpireReservingReservationService,
-)
-from app.application.errors import ReservationStateConflict
 from app.domain.enums import (
     ReservationLineStatus,
     ReservationStatus,
 )
 from app.infrastructure.db.models import (
     InternalStockModel,
-    OrderModel,
-    ProductModel,
     ReservationLineModel,
     ReservationModel,
-    StockSourceModel,
 )
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
-from tests.e2e.support import (
+from tests.conftest import (
     api_client,
     create_body,
     create_headers,
     seed_external_source,
     seed_internal_source,
-    uow_factory,
+    seed_reservation_line,
 )
 
 
@@ -84,60 +77,30 @@ async def test_skip_locked_claimers_take_distinct_pending_provider_work(
         postgres_session_factory,
         sku="CLAIM-A",
     )
-    second_product_id = uuid4()
-    second_source_id = uuid4()
-    async with postgres_session_factory.begin() as session:
-        session.add(
-            ProductModel(
-                id=second_product_id,
-                sku="CLAIM-B",
-                name="CLAIM-B product",
-            )
-        )
-        session.add(
-            StockSourceModel(
-                id=second_source_id,
-                product_id=second_product_id,
-                provider_id=first_source.provider_id,
-                provider_sku="CLAIM-B",
-                enabled=True,
-            )
-        )
-    first_reservation = uuid4()
-    second_reservation = uuid4()
+    second_source = await seed_external_source(
+        postgres_session_factory,
+        sku="CLAIM-B",
+        provider_id=first_source.provider_id,
+    )
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-
-    async with postgres_session_factory.begin() as session:
-        session.add_all(
-            [
-                ReservationModel(
-                    id=first_reservation,
-                    user_id="user-a",
-                    idempotency_key="claim-a",
-                    status=ReservationStatus.RESERVING,
-                    expires_at=expires_at,
-                ),
-                ReservationModel(
-                    id=second_reservation,
-                    user_id="user-b",
-                    idempotency_key="claim-b",
-                    status=ReservationStatus.RESERVING,
-                    expires_at=expires_at,
-                ),
-                ReservationLineModel(
-                    reservation_id=first_reservation,
-                    stock_source_id=first_source.source_id,
-                    quantity=1,
-                    status=ReservationLineStatus.HOLD_PENDING,
-                ),
-                ReservationLineModel(
-                    reservation_id=second_reservation,
-                    stock_source_id=second_source_id,
-                    quantity=1,
-                    status=ReservationLineStatus.HOLD_PENDING,
-                ),
-            ]
-        )
+    first_reservation = await seed_reservation_line(
+        postgres_session_factory,
+        source=first_source,
+        user_id="user-a",
+        idempotency_key="claim-a",
+        reservation_status=ReservationStatus.RESERVING,
+        line_status=ReservationLineStatus.HOLD_PENDING,
+        expires_at=expires_at,
+    )
+    second_reservation = await seed_reservation_line(
+        postgres_session_factory,
+        source=second_source,
+        user_id="user-b",
+        idempotency_key="claim-b",
+        reservation_status=ReservationStatus.RESERVING,
+        line_status=ReservationLineStatus.HOLD_PENDING,
+        expires_at=expires_at,
+    )
 
     async def claim_one():
         async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
@@ -180,29 +143,18 @@ async def test_stale_provider_claim_is_recovered_to_unknown_without_duplicate_tr
         postgres_session_factory,
         sku="STALE-LEASE",
     )
-    reservation_id = uuid4()
     claim_token = uuid4()
-
-    async with postgres_session_factory.begin() as session:
-        session.add(
-            ReservationModel(
-                id=reservation_id,
-                user_id="user-1",
-                idempotency_key="stale-claim",
-                status=ReservationStatus.RESERVING,
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
-            )
-        )
-        session.add(
-            ReservationLineModel(
-                reservation_id=reservation_id,
-                stock_source_id=source.source_id,
-                quantity=1,
-                status=ReservationLineStatus.HOLD_IN_PROGRESS,
-                provider_claim_token=claim_token,
-                provider_lease_until=datetime.now(timezone.utc) - timedelta(seconds=10),
-            )
-        )
+    reservation_id = await seed_reservation_line(
+        postgres_session_factory,
+        source=source,
+        user_id="user-1",
+        idempotency_key="stale-claim",
+        reservation_status=ReservationStatus.RESERVING,
+        line_status=ReservationLineStatus.HOLD_IN_PROGRESS,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        claim_token=claim_token,
+        lease_until=datetime.now(timezone.utc) - timedelta(seconds=10),
+    )
 
     async with SqlAlchemyUnitOfWork(postgres_session_factory) as uow:
         recovered = await uow.reservations.recover_expired_provider_claims(limit=10)

@@ -1,10 +1,14 @@
-# E2E Verification Matrix
+# PostgreSQL BDD Integration Matrix
 
-All tests in this matrix use a real PostgreSQL database through
-`TEST_DATABASE_URL`. Every E2E/API scenario asserts persisted database state,
-not only HTTP responses. Provider scenarios use configurable implementations of one provider interface;
-query-style and hold-style providers both execute through `reserve(...)`, while
-all reservation/worker persistence still uses real PostgreSQL.
+All tests in this matrix are PostgreSQL-backed integration scenarios through
+`TEST_DATABASE_URL`. Each scenario follows **Given / When / Then** phases:
+seed state through `tests/conftest.py`, call the HTTP boundary or worker use
+case, then assert persisted database rows. There are no SQLite, unit-only, or
+API-only test suites.
+
+Shared data builders, HTTP setup, and database lifecycle are owned by
+`tests/conftest.py`; scenario files must not construct catalog/provider/stock
+records directly.
 
 | Area | Scenario | Main test file |
 |---|---|---|

@@ -1,7 +1,5 @@
-from uuid import UUID, uuid4
-
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.application.ports.provider_gateway import (
     ProviderRegistry,
@@ -21,15 +19,17 @@ from app.application.services.create.process_pending_provider_hold import (
 from app.application.services.cancel.process_releasing_reservation import (
     ProcessReleasingReservationService,
 )
-from app.application.services.reconciliation.reconcile_provider_work import ReconcileProviderWorkService
+from app.application.services.reconciliation.reconcile_provider_work import (
+    ReconcileProviderWorkService,
+)
 from app.domain.enums import ReservationLineStatus, ReservationStatus
-from app.infrastructure.db.models import OrderModel, ReservationLineModel, ReservationModel
+from app.infrastructure.db.models import ReservationLineModel, ReservationModel
 from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from app.infrastructure.providers.mock import (
     MockAvailabilityProvider,
     MockReservationProvider,
 )
-from tests.e2e.support import (
+from tests.conftest import (
     api_client,
     create_body,
     create_headers,
@@ -52,6 +52,7 @@ async def _claim_and_process_reservation(factory, registry):
 
     processed = await ProcessPendingProviderHoldService(
         uow_factory=uow_factory(factory),
+        providers=registry,
     ).execute(claimed[0])
     assert processed is True
     return claimed[0]
@@ -193,6 +194,7 @@ async def test_unknown_reservation_is_reconciled_to_active(
 
     reconciled = await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
+        providers=registry,
     ).reconcile_hold(unknown[0])
     assert reconciled is True
 
@@ -257,6 +259,7 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 
     persisted = await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
+        providers=registry,
     ).execute(releases[0])
     assert persisted is True
 
@@ -320,6 +323,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ProcessClaimedProviderReleaseService(
         uow_factory=uow_factory(postgres_session_factory),
+        providers=registry,
     ).execute(releases[0])
 
     async with postgres_session_factory() as session:
@@ -346,6 +350,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 
     await ReconcileProviderWorkService(
         uow_factory=uow_factory(postgres_session_factory),
+        providers=registry,
     ).reconcile_release(unknown[0])
 
     async with postgres_session_factory() as session:
@@ -393,8 +398,7 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
         )
         line = await session.scalar(
             select(ReservationLineModel).where(
-                ReservationLineModel.reservation_id
-                == work.reservation_id
+                ReservationLineModel.reservation_id == work.reservation_id
             )
         )
 
@@ -403,9 +407,7 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
     assert reservation.status == ReservationStatus.ACTIVE
     assert line is not None
     assert line.status == ReservationLineStatus.HELD
-    assert line.external_hold_ref == (
-        f"query:{work.reservation_id}:{source.source_id}:RESERVE"
-    )
+    assert line.external_hold_ref == (f"query:{work.reservation_id}:{source.source_id}:RESERVE")
 
 
 async def test_query_provider_declines_when_availability_is_insufficient(
@@ -439,8 +441,7 @@ async def test_query_provider_declines_when_availability_is_insufficient(
         )
         line = await session.scalar(
             select(ReservationLineModel).where(
-                ReservationLineModel.reservation_id
-                == work.reservation_id
+                ReservationLineModel.reservation_id == work.reservation_id
             )
         )
 
@@ -481,8 +482,7 @@ async def test_missing_provider_is_rejected_during_provider_processing(
         )
         line = await session.scalar(
             select(ReservationLineModel).where(
-                ReservationLineModel.reservation_id
-                == work.reservation_id
+                ReservationLineModel.reservation_id == work.reservation_id
             )
         )
 
