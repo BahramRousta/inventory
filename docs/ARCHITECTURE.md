@@ -47,6 +47,51 @@ An internal-only reservation can become `ACTIVE` synchronously. A reservation
 with external lines is created as `RESERVING` and external work is completed
 asynchronously.
 
+### Asynchronous reservation response contract
+
+`POST /reservations` always returns a `Location` header pointing to the
+reservation resource:
+
+```text
+Location: /reservations/{reservation_id}
+```
+
+Clients use that URI to retrieve the latest reservation state with
+`GET /reservations/{reservation_id}`.
+
+The response status communicates whether the reservation is complete at the
+time of creation:
+
+```text
+201 Created
+```
+
+is returned when all required work completed during the request, such as an
+internal-only reservation that is already `ACTIVE`.
+
+```text
+202 Accepted
+Location: /reservations/{reservation_id}
+Retry-After: {worker pickup interval in seconds}
+```
+
+is returned when the reservation was persisted but external or compensation
+work is still pending. The reservation is normally `RESERVING` or
+`RELEASING`. `Retry-After` is based on the worker polling/pickup interval, not
+on a fixed one-second assumption. If the deployment's worker interval is five
+minutes, the value should be at least `300` seconds. This gives the worker a
+reasonable opportunity to claim and process the work before the client polls
+again.
+
+`202 Accepted` does not mean that the reservation succeeded. The client must
+follow the resource until it reaches a truthful state such as `ACTIVE`,
+`CANCELLED`, or `EXPIRED`. `Location` and `Retry-After` exist because provider
+calls run asynchronously outside the request transaction; they give the
+client a stable resource URI and a bounded polling hint while workers finish
+the durable workflow. The value is a minimum polling recommendation, not a
+guarantee that processing completes within that interval; queue load and
+provider latency can make the actual completion time longer.
+
 ## 3. Architectural style
 
 The implementation uses ports and adapters.

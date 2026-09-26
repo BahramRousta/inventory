@@ -1,3 +1,4 @@
+import math
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response, status
@@ -16,6 +17,7 @@ from app.application.services.cancel.cancel_reservation import CancelReservation
 from app.application.services.confirm.confirm_reservation import ConfirmReservationService
 from app.application.services.create.create_reservation import CreateReservationService
 from app.application.services.inquiry.get_reservation import GetReservationService
+from app.bootstrap.config import get_settings
 from app.bootstrap.dependencies import (
     get_cancel_reservation_service,
     get_confirm_reservation_service,
@@ -79,7 +81,9 @@ async def create_reservation(
 
     if result.status in {ReservationStatus.RESERVING, ReservationStatus.RELEASING}:
         response.status_code = status.HTTP_202_ACCEPTED
-        response.headers["Retry-After"] = "1"
+        response.headers["Retry-After"] = str(
+            max(1, math.ceil(get_settings().provider_worker_poll_interval_seconds))
+        )
     elif result.replayed:
         response.status_code = status.HTTP_200_OK
     else:
@@ -129,7 +133,9 @@ async def cancel_reservation(
     result = await service.execute(reservation_id, user_id=user_id)
     if result.status == ReservationStatus.RELEASING:
         response.status_code = status.HTTP_202_ACCEPTED
-        response.headers["Retry-After"] = "1"
+        response.headers["Retry-After"] = str(
+            max(1, math.ceil(get_settings().provider_worker_poll_interval_seconds))
+        )
     else:
         response.status_code = status.HTTP_200_OK
     return _reservation_response(result)
