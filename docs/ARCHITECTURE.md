@@ -329,6 +329,44 @@ An exception during `reserve()` is treated as `UNKNOWN`, not as a
 definitive failure, because the remote side effect may have happened before the
 response was lost.
 
+### Mixed-source atomicity and compensation
+
+A reservation containing multiple products or stock sources is all-or-none at
+the business level, but it is not one distributed transaction across
+PostgreSQL and external providers.
+
+The workflow is:
+
+```text
+create transaction
+  internal holds + reservation lines
+  -> commit as RESERVING
+
+provider workers
+  all lines HELD       -> ACTIVE
+  any line DECLINED    -> line FAILED, reservation RELEASING
+
+compensation workers
+  release every known HELD line
+  -> reservation CANCELLED when all lines are FAILED or RELEASED
+```
+
+The initial database transaction is atomic. If an internal hold fails, the
+reservation and all earlier internal holds from that request are rolled back.
+External calls happen only after that transaction commits, so their effects
+cannot be rolled back by PostgreSQL. When one external line is definitively
+declined, already-held internal and external lines are therefore released by
+the compensation workflow before the reservation reaches its terminal state.
+
+The reservation state model does not contain a `FAILED` reservation status.
+Failure is represented by a `FAILED` line and the reservation transition
+`RESERVING -> RELEASING -> CANCELLED`. A provider `UNKNOWN` result remains
+`HOLD_UNKNOWN` and is reconciled; it is never treated as a definitive failure
+or released blindly.
+
+This provides eventual all-or-none behavior with durable recovery, rather than
+instantaneous global atomicity across provider systems.
+
 ## 9. Reconciliation
 
 Ambiguous remote outcomes remain durable.
