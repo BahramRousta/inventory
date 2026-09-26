@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -13,6 +14,13 @@ from app.infrastructure.db.models import *
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# `alembic.ini` contains a host-execution default. Compose supplies the
+# container address (`db:5432`) through DATABASE_URL, which must take
+# precedence inside the migration container.
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
