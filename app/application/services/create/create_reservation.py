@@ -3,6 +3,8 @@ Create Reservation
 """
 
 from datetime import timedelta
+from hashlib import sha256
+import json
 from typing import Callable
 from uuid import UUID, uuid4
 
@@ -11,6 +13,7 @@ from app.application.dto.reservations import (
     CreateReservationResult,
 )
 from app.application.errors import (
+    IdempotencyConflict,
     InsufficientStock,
     PersistenceConflict,
     ProductSourceMismatch,
@@ -42,12 +45,14 @@ class CreateReservationService:
 
     async def execute(self, command: CreateReservationCommand) -> CreateReservationResult:
         items = command.items
+        request_fingerprint = _request_fingerprint(items)
         try:
             async with self._uow_factory() as uow:
                 existing = await uow.reservations.get_by_idempotency_key(
                     command.user_id, command.idempotency_key
                 )
                 if existing is not None:
+                    _ensure_same_request(existing.request_fingerprint, request_fingerprint)
                     lines = await uow.reservations.get_lines(existing.reservation_id)
                     return _result(existing, lines, replayed=True)
 
@@ -64,6 +69,7 @@ class CreateReservationService:
                     reservation_id=reservation_id,
                     user_id=command.user_id,
                     idempotency_key=command.idempotency_key,
+                    request_fingerprint=request_fingerprint,
                     expires_at=expires_at,
                     status=ReservationStatus.RESERVING,
                 )
@@ -98,6 +104,7 @@ class CreateReservationService:
                 )
                 if existing is None:
                     raise
+                _ensure_same_request(existing.request_fingerprint, request_fingerprint)
                 lines = await uow.reservations.get_lines(existing.reservation_id)
                 return _result(existing, lines, replayed=True)
 
@@ -132,3 +139,23 @@ def _result(reservation, lines, *, replayed: bool) -> CreateReservationResult:
         lines=lines,
         replayed=replayed,
     )
+
+
+def _request_fingerprint(items) -> str:
+    canonical_items = sorted(
+        (
+            str(item.product_id),
+            str(item.stock_source_id),
+            item.quantity,
+        )
+        for item in items
+    )
+    payload = json.dumps(canonical_items, separators=(",", ":"), ensure_ascii=True)
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _ensure_same_request(stored_fingerprint: str, request_fingerprint: str) -> None:
+    if stored_fingerprint != request_fingerprint:
+        raise IdempotencyConflict(
+            "Idempotency-Key was already used with a different reservation request."
+        )
