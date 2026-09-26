@@ -87,6 +87,7 @@ class ReservationModel(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[str] = mapped_column(String(160), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[ReservationStatus] = mapped_column(
         Enum(ReservationStatus, native_enum=False, length=32), nullable=False
     )

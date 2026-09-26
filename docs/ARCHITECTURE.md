@@ -606,7 +606,21 @@ The database has a uniqueness constraint on:
 (user_id, idempotency_key)
 ```
 
-A retry returns the existing reservation rather than creating a second one.
+Each create command also stores a SHA-256 `request_fingerprint` derived from a
+canonical ordering of:
+
+```text
+(product_id, stock_source_id, quantity)
+```
+
+A retry with the same user, idempotency key, and semantic request returns the
+existing reservation. Reusing the same idempotency key with a different
+request returns `IDEMPOTENCY_CONFLICT` instead of silently replaying the first
+reservation.
+
+The same comparison is performed after a database uniqueness race, so two
+concurrent requests with the same idempotency key but different payloads cannot
+both be treated as successful replays.
 
 ### Confirm
 
@@ -727,7 +741,6 @@ measured needs:
 - secret-manager integration for provider credentials;
 - stronger semantics for query-only providers;
 - structured metrics/tracing and manual-reconciliation tooling;
-- request-body fingerprinting for stronger idempotency-key misuse detection;
 - per-provider worker isolation when one provider can starve others;
 - transactional outbox + broker if database polling becomes a measured
   bottleneck or other services need reservation events;

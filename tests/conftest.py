@@ -151,6 +151,7 @@ class SeedInventory:
                     id=reservation_id,
                     user_id=user_id,
                     idempotency_key=idempotency_key,
+                    request_fingerprint="0" * 64,
                     status=reservation_status,
                     expires_at=expires_at,
                 )

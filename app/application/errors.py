@@ -18,6 +18,10 @@ class InsufficientStock(ApplicationError):
     code = "INSUFFICIENT_STOCK"
 
 
+class IdempotencyConflict(ApplicationError):
+    code = "IDEMPOTENCY_CONFLICT"
+
+
 class PersistenceConflict(Exception):
     """Infrastructure translated a storage conflict that the application can recover from."""
 

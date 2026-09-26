@@ -36,6 +36,7 @@ class SqlAlchemyLifecycleReservationRepository(SqlAlchemyReservationRepository):
             reservation_id=row.id,
             user_id=row.user_id,
             idempotency_key=row.idempotency_key,
+            request_fingerprint=row.request_fingerprint,
             status=row.status,
             created_at=created_at,
             expires_at=expires_at,

@@ -136,6 +136,11 @@ external work return `202 RESERVING`; the response includes a `Location` and a
 `Retry-After` header. The caller must not start payment until the reservation
 is `ACTIVE` and `payment_allowed` is true.
 
+The `Idempotency-Key` is scoped to the user. The service stores a canonical
+SHA-256 fingerprint of the requested product/source/quantity lines. Replaying
+the same request returns the existing reservation; reusing the key with a
+different request returns `409 IDEMPOTENCY_CONFLICT`.
+
 ### Read status
 
 ```bash
