@@ -228,3 +228,69 @@ async def test_concurrent_same_create_idempotency_key_holds_stock_once(
     assert line is not None
     assert line.quantity == 2
     assert line.status == ReservationLineStatus.HELD
+
+async def test_concurrent_different_payloads_with_same_idempotency_key_only_one_request_wins(
+    postgres_session_factory,
+):
+    """Scenario: two concurrent requests reuse one idempotency key with different payloads.
+
+    Given one internal stock source and two create requests with the same user
+    and Idempotency-Key but different quantities,
+    When both requests race concurrently,
+    Then exactly one request creates the reservation, the other receives an
+    idempotency conflict, and PostgreSQL persists one request fingerprint and
+    only the winning quantity is held.
+    """
+    # Given
+    source = await seed_internal_source(
+        postgres_session_factory,
+        sku="CONCURRENT-FINGERPRINT",
+        on_hand=5,
+    )
+
+    async with api_client(postgres_session_factory) as client:
+        async def create(quantity: int):
+            return await client.post(
+                "/reservations",
+                headers=create_headers(
+                    user_id="fingerprint-user",
+                    idempotency_key="concurrent-fingerprint-key",
+                ),
+                json=create_body(source, quantity=quantity),
+            )
+
+        # When
+        first, second = await asyncio.gather(
+            create(1),
+            create(2),
+        )
+
+    # Then
+    assert sorted([first.status_code, second.status_code]) == [201, 409]
+    conflict = first if first.status_code == 409 else second
+    winner = second if first.status_code == 409 else first
+    assert conflict.json()["code"] == "IDEMPOTENCY_CONFLICT"
+
+    reservation_id = UUID(winner.json()["reservation_id"])
+    winning_quantity = winner.json()["lines"][0]["quantity"]
+
+    async with postgres_session_factory() as session:
+        reservation = await session.get(ReservationModel, reservation_id)
+        line = await session.scalar(
+            select(ReservationLineModel).where(
+                ReservationLineModel.reservation_id == reservation_id
+            )
+        )
+        stock = await session.get(InternalStockModel, source.source_id)
+        reservation_count = await session.scalar(
+            select(func.count()).select_from(ReservationModel)
+        )
+
+    assert reservation is not None
+    assert len(reservation.request_fingerprint) == 64
+    assert reservation.request_fingerprint != "0" * 64
+    assert line is not None
+    assert line.quantity == winning_quantity
+    assert stock is not None
+    assert stock.held == winning_quantity
+    assert reservation_count == 1
