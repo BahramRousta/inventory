@@ -741,7 +741,6 @@ measured needs:
 - secret-manager integration for provider credentials;
 - stronger semantics for query-only providers;
 - structured metrics/tracing and manual-reconciliation tooling;
-- request-body fingerprinting for stronger idempotency-key misuse detection;
 - per-provider worker isolation when one provider can starve others;
 - transactional outbox + broker if database polling becomes a measured
   bottleneck or other services need reservation events;
