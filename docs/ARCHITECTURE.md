@@ -164,6 +164,25 @@ For locally controlled inventory:
 available = on_hand - held
 ```
 
+`internal_stock.stock_source_id` is both the row's primary key and a foreign
+key to `stock_sources.id`. This intentionally models internal inventory as a
+one-to-one extension of a stock source:
+
+```text
+stock_sources 1 ---- 0..1 internal_stock
+```
+
+Each source can therefore have at most one internal inventory row, and no
+separate inventory-row identifier is needed. The guarded inventory updates
+address that row directly by `stock_source_id`, while the foreign key prevents
+orphan inventory records. `ON DELETE RESTRICT` also prevents deleting a stock
+source while its internal inventory row still exists.
+
+Only locally controlled sources require an `internal_stock` row; external
+provider sources do not. If inventory is later split into warehouses or
+buckets, this one-row model must be extended to a bucket table with a separate
+bucket identity and an appropriate uniqueness rule.
+
 The database enforces:
 
 ```text
