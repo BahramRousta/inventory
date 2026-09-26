@@ -61,9 +61,7 @@ class StockSourceModel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
-        UniqueConstraint(
-            "product_id", "provider_id", name="uq_stock_source_product_provider"
-        ),
+        UniqueConstraint("product_id", "provider_id", name="uq_stock_source_product_provider"),
     )
 
 
@@ -103,9 +101,7 @@ class ReservationModel(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        UniqueConstraint(
-            "user_id", "idempotency_key", name="uq_reservation_user_idempotency"
-        ),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_reservation_user_idempotency"),
         Index("ix_reservation_status_expiry", "status", "expires_at"),
     )
 
@@ -124,35 +120,17 @@ class ReservationLineModel(Base):
     status: Mapped[ReservationLineStatus] = mapped_column(
         Enum(ReservationLineStatus, native_enum=False, length=32), nullable=False
     )
-
-    # Provider-specific hold identifier. NULL for internal inventory lines.
     external_hold_ref: Mapped[str | None] = mapped_column(String(255))
-
-    # Durable worker claim metadata. The token makes completion writes
-    # compare-and-set; the lease makes a crashed worker's ambiguity recoverable.
     provider_claim_token: Mapped[UUID | None] = mapped_column(Uuid)
-    provider_lease_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-
+    provider_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     held_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        CheckConstraint(
-            "quantity > 0", name="ck_reservation_line_quantity_positive"
-        ),
-        UniqueConstraint(
-            "reservation_id",
-            "stock_source_id",
-            name="uq_reservation_line_source",
-        ),
-        Index(
-            "ix_reservation_line_work_claim",
-            "status",
-            "provider_lease_until",
-        ),
+        CheckConstraint("quantity > 0", name="ck_reservation_line_quantity_positive"),
+        UniqueConstraint("reservation_id", "stock_source_id", name="uq_reservation_line_source"),
+        Index("ix_reservation_line_work_claim", "status", "provider_lease_until"),
     )
 
 

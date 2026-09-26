@@ -1,4 +1,4 @@
-from enum import StrEnum, Enum
+from enum import StrEnum
 
 
 class ProviderKind(StrEnum):
@@ -57,8 +57,3 @@ class ProviderOperationStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
     RETRYABLE = "RETRYABLE"
     MANUAL_REVIEW = "MANUAL_REVIEW"
-
-
-class PaymentOutcome(StrEnum):
-    SUCCESS = "SUCCESS"
-    FAILURE = "FAILURE"

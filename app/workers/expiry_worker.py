@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from app.application.services.expire_reserving_reservation import (
+from app.application.services.expiry.expire_reserving_reservation import (
     ExpireReservingReservationService,
 )
 from app.bootstrap.config import get_settings

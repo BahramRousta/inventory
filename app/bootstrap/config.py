@@ -1,23 +1,45 @@
+import os
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
 
-class Settings(BaseSettings):
-    database_url: str = "postgresql+psycopg://reservation:reservation@127.0.0.1:5454/reservation"
-    reservation_ttl_seconds: int = 900
-    external_provider_id: UUID | None = None
-    external_provider_base_url: str | None = None
-    external_provider_hold_timeout_seconds: float = 5.0
-    in_memory_provider_ids: str = ""
-    provider_worker_poll_interval_seconds: float = Field(default=1.0, gt=0)
-    provider_worker_batch_size: int = Field(default=500, gt=0, le=1_000)
-    provider_worker_lease_seconds: int = Field(default=60, gt=0, le=3_600)
-    provider_worker_concurrency: int = Field(default=5, gt=0, le=100)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://reservation:reservation@127.0.0.1:5454/reservation",
+    )
+    reservation_ttl_seconds: int = int(os.getenv("RESERVATION_TTL_SECONDS", "600"))
+    external_provider_id: UUID | None = (
+        UUID(os.environ["EXTERNAL_PROVIDER_ID"])
+        if os.getenv("EXTERNAL_PROVIDER_ID")
+        else None
+    )
+    query_only_provider_id: UUID | None = (
+        UUID(os.environ["QUERY_ONLY_PROVIDER_ID"])
+        if os.getenv("QUERY_ONLY_PROVIDER_ID")
+        else None
+    )
+    mock_provider_mode: str = os.getenv("MOCK_PROVIDER_MODE", "success")
+    mock_provider_available_quantity: int = int(
+        os.getenv("MOCK_PROVIDER_AVAILABLE_QUANTITY", "100")
+    )
+    provider_worker_poll_interval_seconds: float = float(
+        os.getenv("PROVIDER_WORKER_POLL_INTERVAL_SECONDS", "10.0")
+    )
+    provider_worker_batch_size: int = int(os.getenv("PROVIDER_WORKER_BATCH_SIZE", "500"))
+    provider_worker_lease_seconds: int = int(
+        os.getenv("PROVIDER_WORKER_LEASE_SECONDS", "60")
+    )
+    provider_worker_concurrency: int = int(os.getenv("PROVIDER_WORKER_CONCURRENCY", "5"))
 
 
 @lru_cache

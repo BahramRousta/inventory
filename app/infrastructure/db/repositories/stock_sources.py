@@ -4,8 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.dto.reservations import StockSourceRecord
-from app.domain.enums import ProviderKind
-from app.infrastructure.db.models import StockSourceModel, InventoryProviderModel
+from app.infrastructure.db.models import InventoryProviderModel, StockSourceModel
 
 
 class SqlAlchemyStockSourceRepository:
@@ -34,10 +33,5 @@ class SqlAlchemyStockSourceRepository:
                 provider_kind=provider.kind,
                 provider_enabled=provider.enabled,
                 source_enabled=source.enabled,
-                # The current persisted provider model distinguishes only
-                # internal and external sources. Gateway registration will
-                # enforce the external provider contract in the next step.
-                reservation_supported=provider.kind
-                in {ProviderKind.INTERNAL, ProviderKind.EXTERNAL},
             )
         return result

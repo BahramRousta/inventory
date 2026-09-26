@@ -16,6 +16,10 @@ class SqlAlchemyOrderRepository:
         )
 
     async def create(self, *, reservation_id: UUID, user_id: str) -> UUID:
+        existing = await self.get_by_reservation_id(reservation_id)
+        if existing is not None:
+            return existing
+
         order_id = uuid4()
         self._session.add(
             OrderModel(

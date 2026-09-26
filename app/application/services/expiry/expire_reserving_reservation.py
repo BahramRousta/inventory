@@ -12,10 +12,8 @@ class ExpireReservingReservationService:
 
     async def execute_batch(self, *, limit: int) -> tuple[UUID, ...]:
         async with self._uow_factory() as uow:
-            reservation_ids = (
-                await uow.reservations.claim_expired_reserving_reservations(
-                    limit=limit
-                )
+            reservation_ids = await uow.reservations.claim_expired_reserving_reservations(
+                limit=limit
             )
             await uow.commit()
             return reservation_ids
