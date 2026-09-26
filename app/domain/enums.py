@@ -6,14 +6,6 @@ class ProviderKind(StrEnum):
     EXTERNAL = "EXTERNAL"
 
 
-class ProviderCapability(StrEnum):
-    CHECK = "CHECK"
-    HOLD = "HOLD"
-    CONFIRM = "CONFIRM"
-    RELEASE = "RELEASE"
-    GET_HOLD = "GET_HOLD"
-
-
 class ReservationStatus(StrEnum):
     RESERVING = "RESERVING"
     ACTIVE = "ACTIVE"
@@ -41,19 +33,3 @@ class ReservationLineStatus(StrEnum):
 
     FAILED = "FAILED"
 
-
-class ProviderOperationType(StrEnum):
-    HOLD = "HOLD"
-    CONFIRM = "CONFIRM"
-    RELEASE = "RELEASE"
-    CHECK = "CHECK"
-
-
-class ProviderOperationStatus(StrEnum):
-    PENDING = "PENDING"
-    IN_PROGRESS = "IN_PROGRESS"
-    SUCCEEDED = "SUCCEEDED"
-    DECLINED = "DECLINED"
-    UNKNOWN = "UNKNOWN"
-    RETRYABLE = "RETRYABLE"
-    MANUAL_REVIEW = "MANUAL_REVIEW"
