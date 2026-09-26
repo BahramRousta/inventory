@@ -97,6 +97,16 @@ row. The demo external provider ID is:
 11111111-1111-1111-1111-111111111111
 ```
 
+The demo query-only provider ID is:
+
+```text
+22222222-2222-2222-2222-222222222222
+```
+
+Each seeded product has an internal source, a reservable external source, and
+a query-only external source. Use the printed `stock_source_id` that matches
+the provider behavior you want to demonstrate.
+
 ## Reservation API
 
 The caller supplies a verified user identity through `X-User-Id`. Payment
@@ -187,20 +197,6 @@ docker compose run --rm hold-worker python -m app.workers.hold_worker --forever
 Do not run multiple copies of the same worker against a database unless you
 intend to scale it. Row claims use PostgreSQL `FOR UPDATE SKIP LOCKED`, claim
 tokens, and leases so separate worker processes can safely share the queue.
-
-## View application and worker logs
-
-Compose keeps the API and workers attached to the foreground. To follow their
-logs from another terminal:
-
-```bash
-docker compose logs -f api hold-worker release-worker reconciliation-worker expiry-worker
-```
-
-The API logs one line for each reservation create/read/confirm/cancel request.
-Each worker logs one line per polling iteration with its claimed, processed,
-reconciled, or expired counts. Provider payloads, credentials, and request
-bodies are not logged.
 
 ## Configuration
 

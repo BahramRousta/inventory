@@ -13,21 +13,33 @@ load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
 @dataclass(frozen=True)
 class Settings:
-    database_url = os.getenv(
+    database_url: str = os.getenv(
         "DATABASE_URL",
         "postgresql+psycopg://reservation:reservation@127.0.0.1:5454/reservation",
     )
-    reservation_ttl_seconds = int(os.getenv("RESERVATION_TTL_SECONDS", 600))
-    external_provider_id = os.getenv("EXTERNAL_PROVIDER_ID")
-    query_only_provider_id = os.getenv("QUERY_ONLY_PROVIDER_ID")
-    mock_provider_mode = os.getenv("MOCK_PROVIDER_MODE", "success")
-    mock_provider_available_quantity = os.getenv("MOCK_PROVIDER_AVAILABLE_QUANTITY", 100)
-    provider_worker_poll_interval_seconds = os.getenv(
-        "PROVIDER_WORKER_POLL_INTERVAL_SECONDS", 10.0
+    reservation_ttl_seconds: int = int(os.getenv("RESERVATION_TTL_SECONDS", "600"))
+    external_provider_id: UUID | None = (
+        UUID(os.environ["EXTERNAL_PROVIDER_ID"])
+        if os.getenv("EXTERNAL_PROVIDER_ID")
+        else None
     )
-    provider_worker_batch_size = os.getenv("PROVIDER_WORKER_BATCH_SIZE", 500)
-    provider_worker_lease_seconds = os.getenv("PROVIDER_WORKER_LEASE_SECONDS", 60)
-    provider_worker_concurrency = os.getenv("PROVIDER_WORKER_CONCURRENCY", 5)
+    query_only_provider_id: UUID | None = (
+        UUID(os.environ["QUERY_ONLY_PROVIDER_ID"])
+        if os.getenv("QUERY_ONLY_PROVIDER_ID")
+        else None
+    )
+    mock_provider_mode: str = os.getenv("MOCK_PROVIDER_MODE", "success")
+    mock_provider_available_quantity: int = int(
+        os.getenv("MOCK_PROVIDER_AVAILABLE_QUANTITY", "100")
+    )
+    provider_worker_poll_interval_seconds: float = float(
+        os.getenv("PROVIDER_WORKER_POLL_INTERVAL_SECONDS", "10.0")
+    )
+    provider_worker_batch_size: int = int(os.getenv("PROVIDER_WORKER_BATCH_SIZE", "500"))
+    provider_worker_lease_seconds: int = int(
+        os.getenv("PROVIDER_WORKER_LEASE_SECONDS", "60")
+    )
+    provider_worker_concurrency: int = int(os.getenv("PROVIDER_WORKER_CONCURRENCY", "5"))
 
 
 @lru_cache

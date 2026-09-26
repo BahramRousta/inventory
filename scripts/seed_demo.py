@@ -14,6 +14,7 @@ from app.infrastructure.db.session import get_session
 
 
 DEMO_EXTERNAL_PROVIDER_ID = UUID("11111111-1111-1111-1111-111111111111")
+DEMO_QUERY_ONLY_PROVIDER_ID = UUID("22222222-2222-2222-2222-222222222222")
 
 DEMO_PRODUCTS = (
     ("ANKR-HUB-7C", "Anker USB-C Hub 7-in-1", 10),
@@ -24,10 +25,13 @@ DEMO_PRODUCTS = (
 DEMO_SOURCE_PLANS = (
     ("ANKR-HUB-7C", "InternalStock"),
     ("ANKR-HUB-7C", "FakeExternalProvider"),
+    ("ANKR-HUB-7C", "FakeQueryOnlyProvider"),
     ("LOGI-MX-M3S", "InternalStock"),
     ("LOGI-MX-M3S", "FakeExternalProvider"),
+    ("LOGI-MX-M3S", "FakeQueryOnlyProvider"),
     ("SONY-WH-1000XM5", "InternalStock"),
     ("SONY-WH-1000XM5", "FakeExternalProvider"),
+    ("SONY-WH-1000XM5", "FakeQueryOnlyProvider"),
 )
 
 
@@ -62,9 +66,24 @@ async def main() -> None:
                 await session.flush()
             external.enabled = True
 
+            query_only = await session.get(
+                InventoryProviderModel, DEMO_QUERY_ONLY_PROVIDER_ID
+            )
+            if query_only is None:
+                query_only = InventoryProviderModel(
+                    id=DEMO_QUERY_ONLY_PROVIDER_ID,
+                    name="FakeQueryOnlyProvider",
+                    kind=ProviderKind.EXTERNAL,
+                    enabled=True,
+                )
+                session.add(query_only)
+                await session.flush()
+            query_only.enabled = True
+
             providers = {
                 "InternalStock": internal,
                 "FakeExternalProvider": external,
+                "FakeQueryOnlyProvider": query_only,
             }
 
             products: dict[str, tuple[ProductModel, int]] = {}
@@ -118,6 +137,7 @@ async def main() -> None:
                 )
 
     print("EXTERNAL_PROVIDER_ID=11111111-1111-1111-1111-111111111111")
+    print("QUERY_ONLY_PROVIDER_ID=22222222-2222-2222-2222-222222222222")
     print("Seeded source-specific inventory:")
     for sku, product_id, provider_name, provider_id, source_id in seeded_sources:
         print(
