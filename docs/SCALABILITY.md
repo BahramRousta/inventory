@@ -68,11 +68,26 @@ Signals that justify changing it:
 
 Possible next designs, in increasing complexity:
 
-1. split one logical stock source into physical inventory buckets where that
-   matches the warehouse model;
-2. pre-allocate inventory pools to partitions/regions;
-3. serialize extremely hot SKU mutations through a dedicated queue;
-4. shard inventory ownership only when the operational model requires it.
+1. **Serialize known hot SKUs through a durable queue.** Requests for a
+   configured hot SKU are routed through a durable, ordered work queue so
+   mutations for that SKU are processed serially. Regular SKUs continue to
+   use the existing guarded SQL reservation path. This avoids concentrating
+   concurrent writes on one hot row, but requires identifying hot SKUs ahead of
+   time or maintaining a measured/configured hot-SKU list. It also adds queue
+   latency and another operational workflow to monitor.
+2. **Split inventory into buckets (striped counters).** Instead of one stock
+   row with, for example, `10_000` units, distribute the quantity across
+   several bucket rows and spread reservations across those buckets. This
+   reduces contention on one row, but requires scatter/gather reservation logic,
+   careful handling of partial failures, and reconciliation of fragmented
+   remaining quantities. The inventory can also become operationally harder to
+   reason about when many small bucket balances remain.
+
+The first option is preferable when the set of flash-sale SKUs is small and
+predictable. The bucket option is preferable when contention is broad or the
+inventory model already supports independent physical pools. Neither should be
+introduced before measuring contention and defining the required failure and
+reconciliation behavior.
 
 I would not introduce sharding preemptively because cross-shard reservation and
 rebalancing are significantly harder than a single guarded SQL update.
@@ -96,7 +111,7 @@ itself increase provider-call throughput.
 
 The metrics I would watch per provider are:
 
-- reserve latency p50/p95/p99;
+- reserve latency;
 - release latency;
 - error/timeout rate;
 - decline rate;
@@ -154,7 +169,7 @@ The likely database problems at larger history sizes are:
 Signals that justify work-queue changes:
 
 - work-claim queries become a meaningful fraction of database load;
-- p95 claim latency grows as terminal history grows;
+- claim latency grows as terminal history grows;
 - workers cannot keep up even though provider capacity is available;
 - autovacuum/index maintenance becomes operationally significant.
 
@@ -164,7 +179,6 @@ Before introducing a broker I would:
 2. archive old terminal reservations;
 3. keep claim batches bounded;
 4. tune polling intervals;
-5. separate API and worker database connection budgets.
 
 ## 6. Why no message broker yet
 
@@ -188,9 +202,6 @@ I would introduce a broker when at least one of these becomes true:
 - PostgreSQL polling measurably competes with checkout traffic;
 - provider work needs much higher independent throughput;
 - multiple other services need reservation events;
-- retention/replay requirements exceed what the operational reservation tables
-  should provide;
-- queue age cannot be controlled economically by database workers.
 
 The migration path would be:
 
@@ -224,7 +235,6 @@ Signals that require a different strategy:
 
 - expiry scans consume noticeable database IO;
 - millions of simultaneously active reservations;
-- expiration precision requirements become tighter than the polling interval;
 - worker lag causes reservations to remain held materially past their TTL.
 
 Possible next steps:
@@ -232,7 +242,6 @@ Possible next steps:
 1. tune batch size and poll interval;
 2. use partial indexes for expirable states;
 3. partition/archive old reservations;
-4. only then consider a dedicated delayed-queue/timer system.
 
 ## 8. Database connection pressure
 
@@ -347,27 +356,12 @@ When terminal history becomes large, I would:
 1. archive old confirmed/cancelled/expired reservations to a history store or
    partition;
 2. keep active-work indexes small with partial indexes;
-3. preserve order/reservation identifiers needed for audit;
-4. avoid deleting unresolved provider work until reconciliation policy allows
-   it.
 
 A change is justified when operational query latency or maintenance cost is
 measurably affected by historical data.
 
-## 13. Caching
 
-Redis is not required for reservation correctness.
-
-Caching product or read-only reservation views may reduce read load, but writes
-must continue to use PostgreSQL as the authority.
-
-I would not cache available internal inventory as the source of truth because
-that would create another consistency problem around stock mutation.
-
-A cache becomes useful only if read traffic is demonstrated to dominate
-database load.
-
-## 14. Observability required before scaling
+## 13. Observability required before scaling
 
 Scaling decisions should be based on measured bottlenecks.
 
@@ -376,14 +370,13 @@ Minimum production metrics:
 ### API
 
 - request rate;
-- p50/p95/p99 latency;
+- latency;
 - error rate by endpoint.
 
 ### Database
 
 - transaction latency;
 - lock wait time;
-- deadlocks;
 - connection usage;
 - slow work-claim queries;
 - vacuum/index growth.
@@ -405,20 +398,3 @@ Minimum production metrics:
 
 These measurements determine whether the next investment belongs in the
 database, worker pool, provider isolation, or message infrastructure.
-
-## 15. Scale-out order
-
-I would evolve the system in this order:
-
-1. measure latency, locks, provider queue age, and connection pressure;
-2. tune SQL indexes, transaction duration, and connection pools;
-3. tune worker batch size/concurrency per provider;
-4. add provider-specific rate limiting and circuit breaking;
-5. archive terminal data and add partial active-work indexes;
-6. add a transactional outbox and broker only when database polling is a
-   measured bottleneck or events need multiple consumers;
-7. partition/shard inventory only when hot-row contention or data volume proves
-   it is necessary.
-
-This order preserves the current correctness model and adds complexity only
-when there is evidence that the simpler design is no longer sufficient.
