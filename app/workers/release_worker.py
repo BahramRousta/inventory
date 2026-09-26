@@ -12,24 +12,23 @@ from app.infrastructure.db.uow import SqlAlchemyUnitOfWork
 
 async def run_once() -> bool:
     settings = get_settings()
-    async with SqlAlchemyUnitOfWork(AsyncSessionLocal) as uow:
-        reservation_id = await uow.reservations.get_next_releasing_reservation_id()
-    prepared = (
-        await get_process_releasing_reservation_service().execute(reservation_id)
-        if reservation_id is not None
-        else False
+
+    prepared = await get_process_releasing_reservation_service().execute_batch(
+        limit=settings.provider_worker_batch_size
     )
 
-    # This service owns the same batch-claim mechanics as HOLD, selected here
-    # through the release-specific repository operation.
+    # External provider calls remain a separate phase. Pending release lines are
+    # durably claimed with leases before network I/O, so no DB transaction is
+    # held while a provider is slow or unavailable.
     async with SqlAlchemyUnitOfWork(AsyncSessionLocal) as uow:
         claimed = await uow.reservations.claim_pending_external_releases(
             limit=settings.provider_worker_batch_size,
             lease_seconds=settings.provider_worker_lease_seconds,
         )
         await uow.commit()
+
     if not claimed:
-        return prepared
+        return bool(prepared)
 
     processor = get_process_claimed_provider_release_service()
     semaphore = asyncio.Semaphore(settings.provider_worker_concurrency)
@@ -39,7 +38,7 @@ async def run_once() -> bool:
             return await processor.execute(work)
 
     results = await asyncio.gather(*(process_one(work) for work in claimed))
-    return prepared or any(results)
+    return bool(prepared) or any(results)
 
 
 async def run_forever() -> None:

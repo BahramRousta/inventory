@@ -283,13 +283,17 @@ class SqlAlchemyReservationRepository:
             is not None
         )
 
-    async def get_next_releasing_reservation_id(self) -> UUID | None:
-        return await self._session.scalar(
-            select(ReservationModel.id)
-            .where(ReservationModel.status == ReservationStatus.RELEASING)
-            .order_by(ReservationModel.updated_at, ReservationModel.id)
-            .limit(1)
-        )
+    async def lock_releasing_reservation_ids(self, *, limit: int) -> tuple[UUID, ...]:
+        reservation_ids = (
+            await self._session.scalars(
+                select(ReservationModel.id)
+                .where(ReservationModel.status == ReservationStatus.RELEASING)
+                .order_by(ReservationModel.updated_at, ReservationModel.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        return tuple(reservation_ids)
 
     async def claim_pending_external_holds(
         self, *, limit: int, lease_seconds: int
