@@ -27,7 +27,6 @@ class ProviderReservationLookupOutcome(StrEnum):
 class ProviderReserveResult:
     outcome: ProviderReserveOutcome
     external_ref: str | None = None
-    external_expires_at: datetime | None = None
     error_code: str | None = None
 
 

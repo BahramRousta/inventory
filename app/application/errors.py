@@ -6,10 +6,6 @@ class ApplicationError(Exception):
         self.message = message
 
 
-class InvalidReservationItems(ApplicationError):
-    code = "INVALID_RESERVATION_ITEMS"
-
-
 class ProductSourceMismatch(ApplicationError):
     code = "PRODUCT_SOURCE_MISMATCH"
 
@@ -18,16 +14,8 @@ class SourceDisabled(ApplicationError):
     code = "SOURCE_DISABLED"
 
 
-class SourceNotReservable(ApplicationError):
-    code = "SOURCE_NOT_RESERVABLE"
-
-
 class InsufficientStock(ApplicationError):
     code = "INSUFFICIENT_STOCK"
-
-
-class IdempotencyConflict(ApplicationError):
-    code = "IDEMPOTENCY_CONFLICT"
 
 
 class PersistenceConflict(Exception):

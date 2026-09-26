@@ -4,25 +4,19 @@ from fastapi.responses import JSONResponse
 
 from app.application.errors import (
     ApplicationError,
-    IdempotencyConflict,
     InsufficientStock,
-    InvalidReservationItems,
     ProductSourceMismatch,
     ReservationExpired,
     ReservationNotFound,
     ReservationStateConflict,
     SourceDisabled,
-    SourceNotReservable,
 )
 
 
 ERROR_STATUS = {
-    InvalidReservationItems: 422,
     ProductSourceMismatch: 422,
     SourceDisabled: 422,
-    SourceNotReservable: 422,
     InsufficientStock: 409,
-    IdempotencyConflict: 409,
     ReservationNotFound: 404,
     ReservationExpired: 409,
     ReservationStateConflict: 409,

@@ -40,9 +40,3 @@ class CreateReservationResponse(ReservationResponse):
 
 class ConfirmReservationResponse(ReservationResponse):
     order_id: UUID
-
-
-
-class ErrorResponse(BaseModel):
-    code: str
-    message: str
