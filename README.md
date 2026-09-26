@@ -80,7 +80,7 @@ safe to run repeatedly for the same seeded records.
 With the Compose API container:
 
 ```bash
-docker compose exec api python scripts/seed_demo.py
+docker compose exec api python -m  scripts.seed_demo
 ```
 
 Or from the host environment after PostgreSQL is available:
@@ -187,6 +187,20 @@ docker compose run --rm hold-worker python -m app.workers.hold_worker --forever
 Do not run multiple copies of the same worker against a database unless you
 intend to scale it. Row claims use PostgreSQL `FOR UPDATE SKIP LOCKED`, claim
 tokens, and leases so separate worker processes can safely share the queue.
+
+## View application and worker logs
+
+Compose keeps the API and workers attached to the foreground. To follow their
+logs from another terminal:
+
+```bash
+docker compose logs -f api hold-worker release-worker reconciliation-worker expiry-worker
+```
+
+The API logs one line for each reservation create/read/confirm/cancel request.
+Each worker logs one line per polling iteration with its claimed, processed,
+reconciled, or expired counts. Provider payloads, credentials, and request
+bodies are not logged.
 
 ## Configuration
 
