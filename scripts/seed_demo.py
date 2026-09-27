@@ -10,7 +10,7 @@ from app.infrastructure.db.models import (
     ProductModel,
     StockSourceModel,
 )
-from app.infrastructure.db.session import get_session
+from app.infrastructure.db.session import AsyncSessionLocal
 
 
 DEMO_EXTERNAL_PROVIDER_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -38,7 +38,7 @@ DEMO_SOURCE_PLANS = (
 async def main() -> None:
     seeded_sources: list[tuple[str, str, str, str, str]] = []
 
-    async with get_session() as session:
+    async with AsyncSessionLocal() as session:
         async with session.begin():
             internal = await session.scalar(
                 select(InventoryProviderModel).where(InventoryProviderModel.name == "InternalStock")
