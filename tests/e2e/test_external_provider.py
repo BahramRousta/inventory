@@ -61,6 +61,13 @@ async def _claim_and_process_reservation(factory, registry):
 async def test_mock_reservation_provider_reserve_success_activates_reservation(
     postgres_session_factory,
 ):
+    """Scenario: a successful external hold activates its reservation.
+
+    Given an enabled external source and a provider that accepts the hold,
+    When the API creates the reservation and the hold worker processes it,
+    Then the line is HELD and the reservation becomes ACTIVE.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-SUCCESS",
@@ -68,6 +75,7 @@ async def test_mock_reservation_provider_reserve_success_activates_reservation(
     gateway = MockReservationProvider()
     registry = provider_registry(source.provider_id, gateway)
 
+    # When
     async with api_client(
         postgres_session_factory,
     ) as client:
@@ -88,6 +96,7 @@ async def test_mock_reservation_provider_reserve_success_activates_reservation(
             )
         )
 
+    # Then
     assert gateway.reserve_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
@@ -101,6 +110,13 @@ async def test_mock_reservation_provider_reserve_success_activates_reservation(
 async def test_mock_provider_decline_compensates_to_cancelled(
     postgres_session_factory,
 ):
+    """Scenario: a definitive provider decline cancels the reservation.
+
+    Given an external provider configured to decline its hold,
+    When hold processing and compensation run,
+    Then the line is FAILED and the reservation finishes CANCELLED.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-DECLINE",
@@ -111,6 +127,7 @@ async def test_mock_provider_decline_compensates_to_cancelled(
     )
     registry = provider_registry(source.provider_id, gateway)
 
+    # When
     async with api_client(
         postgres_session_factory,
     ) as client:
@@ -144,6 +161,7 @@ async def test_mock_provider_decline_compensates_to_cancelled(
     async with postgres_session_factory() as session:
         reservation = await session.get(ReservationModel, work.reservation_id)
 
+    # Then
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
 
@@ -151,6 +169,13 @@ async def test_mock_provider_decline_compensates_to_cancelled(
 async def test_unknown_reservation_is_reconciled_to_active(
     postgres_session_factory,
 ):
+    """Scenario: reconciliation resolves an ambiguous hold as successful.
+
+    Given a provider hold that returns UNKNOWN and later reports RESERVED,
+    When the hold and reconciliation workers process the line,
+    Then the line becomes HELD and the reservation becomes ACTIVE.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-UNKNOWN",
@@ -161,6 +186,7 @@ async def test_unknown_reservation_is_reconciled_to_active(
     )
     registry = provider_registry(source.provider_id, gateway)
 
+    # When
     async with api_client(
         postgres_session_factory,
     ) as client:
@@ -206,6 +232,7 @@ async def test_unknown_reservation_is_reconciled_to_active(
             )
         )
 
+    # Then
     assert gateway.lookup_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
@@ -217,6 +244,13 @@ async def test_unknown_reservation_is_reconciled_to_active(
 async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
     postgres_session_factory,
 ):
+    """Scenario: cancelling an external hold releases provider inventory.
+
+    Given an ACTIVE reservation backed by a successful external hold,
+    When the owner cancels it and the release worker calls the provider,
+    Then the line is RELEASED and the reservation becomes CANCELLED.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-RELEASE",
@@ -224,6 +258,7 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
     gateway = MockReservationProvider()
     registry = provider_registry(source.provider_id, gateway)
 
+    # When
     async with api_client(
         postgres_session_factory,
     ) as client:
@@ -271,6 +306,7 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
             )
         )
 
+    # Then
     assert gateway.release_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
@@ -281,6 +317,13 @@ async def test_external_cancel_uses_mock_release_and_finishes_cancelled(
 async def test_release_unknown_requires_lookup_before_terminal_cancel(
     postgres_session_factory,
 ):
+    """Scenario: an ambiguous release requires provider inquiry.
+
+    Given an external release that returns UNKNOWN but later reports not reserved,
+    When release processing and reconciliation run,
+    Then the reservation remains RELEASING until inquiry proves it can be CANCELLED.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-MOCK-RELEASE-UNKNOWN",
@@ -291,6 +334,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
     )
     registry = provider_registry(source.provider_id, gateway)
 
+    # When
     async with api_client(
         postgres_session_factory,
     ) as client:
@@ -361,6 +405,7 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
             )
         )
 
+    # Then
     assert reservation is not None
     assert reservation.status == ReservationStatus.CANCELLED
     assert line is not None
@@ -370,6 +415,13 @@ async def test_release_unknown_requires_lookup_before_terminal_cancel(
 async def test_query_provider_reserve_uses_availability_and_activates_reservation(
     postgres_session_factory,
 ):
+    """Scenario: sufficient advisory availability activates a query-provider line.
+
+    Given a query-style provider reporting enough available quantity,
+    When its pending hold is processed,
+    Then the line is HELD and the reservation becomes ACTIVE.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-QUERY-PROVIDER",
@@ -377,6 +429,7 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
     provider = MockAvailabilityProvider(available_quantity=5)
     registry = provider_registry(source.provider_id, provider)
 
+    # When
     async with api_client(postgres_session_factory) as client:
         created = await client.post(
             "/reservations",
@@ -402,6 +455,7 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
             )
         )
 
+    # Then
     assert provider.reserve_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.ACTIVE
@@ -413,6 +467,13 @@ async def test_query_provider_reserve_uses_availability_and_activates_reservatio
 async def test_query_provider_declines_when_availability_is_insufficient(
     postgres_session_factory,
 ):
+    """Scenario: insufficient advisory availability declines a query-provider line.
+
+    Given a query-style provider reporting less stock than requested,
+    When its pending hold is processed,
+    Then the line is FAILED and the reservation enters RELEASING.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-QUERY-INSUFFICIENT",
@@ -420,6 +481,7 @@ async def test_query_provider_declines_when_availability_is_insufficient(
     provider = MockAvailabilityProvider(available_quantity=1)
     registry = provider_registry(source.provider_id, provider)
 
+    # When
     async with api_client(postgres_session_factory) as client:
         created = await client.post(
             "/reservations",
@@ -445,6 +507,7 @@ async def test_query_provider_declines_when_availability_is_insufficient(
             )
         )
 
+    # Then
     assert provider.reserve_calls == 1
     assert reservation is not None
     assert reservation.status == ReservationStatus.RELEASING
@@ -456,11 +519,19 @@ async def test_query_provider_declines_when_availability_is_insufficient(
 async def test_missing_provider_is_rejected_during_provider_processing(
     postgres_session_factory,
 ):
+    """Scenario: missing runtime provider registration fails the external line.
+
+    Given an external source whose provider is absent from the runtime registry,
+    When the hold worker processes its pending line,
+    Then the line is FAILED and the reservation enters RELEASING.
+    """
+    # Given
     source = await seed_external_source(
         postgres_session_factory,
         sku="EXT-NO-PROVIDER",
     )
 
+    # When
     async with api_client(postgres_session_factory) as client:
         created = await client.post(
             "/reservations",
@@ -486,6 +557,7 @@ async def test_missing_provider_is_rejected_during_provider_processing(
             )
         )
 
+    # Then
     assert reservation is not None
     assert reservation.status == ReservationStatus.RELEASING
     assert reservation.release_reason == "CREATE_FAILED"
