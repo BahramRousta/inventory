@@ -502,6 +502,7 @@ dependencies = [
     { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -522,6 +523,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25,<1" },
+    { name = "python-dotenv", specifier = ">=1.0,<2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
